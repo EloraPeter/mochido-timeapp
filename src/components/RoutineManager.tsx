@@ -1,7 +1,9 @@
-// components/RoutineManager.tsx (Updated - No Mochi, Add Drag & Drop)
+// components/RoutineManager.tsx
+// Mobile-First Redesign: Full height usage, bottom sheets, thumb-friendly layout
+
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useRoutines } from '@/hooks/useRoutines';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { useCustomAlert } from '@/hooks/useCustomAlert';
@@ -26,7 +28,8 @@ import {
   BookOpen,
   Dumbbell,
   Bed,
-  Sparkles
+  Sparkles,
+  ChevronRight
 } from 'lucide-react';
 
 interface RoutineFormData {
@@ -42,12 +45,12 @@ const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'satur
 
 // Template suggestions
 const TEMPLATES = [
-  { title: 'Morning Meditation', durationMinutes: 10, affectsWakeUp: true, icon: <Sparkles size={16} /> },
-  { title: 'Shower & Get Ready', durationMinutes: 20, affectsWakeUp: true, icon: <Sun size={16} /> },
-  { title: 'Healthy Breakfast', durationMinutes: 15, affectsWakeUp: true, icon: <Coffee size={16} /> },
-  { title: 'Study Session', durationMinutes: 60, affectsWakeUp: false, icon: <BookOpen size={16} /> },
-  { title: 'Exercise / Stretch', durationMinutes: 30, affectsWakeUp: false, icon: <Dumbbell size={16} /> },
-  { title: 'Evening Wind Down', durationMinutes: 15, affectsWakeUp: false, icon: <Bed size={16} /> },
+  { title: 'Morning Meditation', durationMinutes: 10, affectsWakeUp: true, icon: <Sparkles size={20} />, color: 'bg-purple-100 text-purple-600' },
+  { title: 'Shower & Get Ready', durationMinutes: 20, affectsWakeUp: true, icon: <Sun size={20} />, color: 'bg-yellow-100 text-yellow-600' },
+  { title: 'Healthy Breakfast', durationMinutes: 15, affectsWakeUp: true, icon: <Coffee size={20} />, color: 'bg-amber-100 text-amber-600' },
+  { title: 'Study Session', durationMinutes: 60, affectsWakeUp: false, icon: <BookOpen size={20} />, color: 'bg-blue-100 text-blue-600' },
+  { title: 'Exercise / Stretch', durationMinutes: 30, affectsWakeUp: false, icon: <Dumbbell size={20} />, color: 'bg-green-100 text-green-600' },
+  { title: 'Evening Wind Down', durationMinutes: 15, affectsWakeUp: false, icon: <Bed size={20} />, color: 'bg-indigo-100 text-indigo-600' },
 ];
 
 export default function RoutineManager() {
@@ -67,16 +70,10 @@ export default function RoutineManager() {
     affectsWakeUp: false
   });
 
-  // Time blocks for visual schedule (6 AM to 10 PM)
-  const timeBlocks = Array.from({ length: 17 }, (_, i) => {
-    const hour = 6 + i;
-    return `${hour.toString().padStart(2, '0')}:00`;
-  });
-
-  // Get routines for a specific time block (simplified - based on order)
-  const getRoutinesForTimeBlock = (index: number) => {
-    return orderedRoutines.filter((_, i) => i === index);
-  };
+  // Sync ordered routines when main list changes
+  useEffect(() => {
+    setOrderedRoutines(routines);
+  }, [routines]);
 
   const morningRoutines = getMorningRoutines();
   const totalPrepTime = morningRoutines.reduce((sum, r) => sum + r.durationMinutes, 0);
@@ -196,16 +193,14 @@ export default function RoutineManager() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-20">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-16">
         <MobileSidebar />
-        <div className="max-w-4xl mx-auto p-4">
-          <div className="ml-10 md:ml-0 mb-6">
-            <div className="w-32 h-8 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
-            <div className="w-48 h-4 bg-gray-200 dark:bg-gray-700 rounded mt-1 animate-pulse" />
-          </div>
-          <div className="animate-pulse space-y-3">
+        <div className="p-4 pt-2">
+          <div className="w-32 h-8 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse mb-1" />
+          <div className="w-48 h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-6" />
+          <div className="space-y-3">
             {[1, 2, 3].map(i => (
-              <div key={i} className="bg-white dark:bg-gray-800 rounded-2xl p-4 h-20" />
+              <div key={i} className="bg-white dark:bg-gray-800 rounded-2xl p-4 h-24" />
             ))}
           </div>
         </div>
@@ -215,171 +210,135 @@ export default function RoutineManager() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-20 md:pb-0">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-16">
       <MobileSidebar />
       <BottomTabBar />
 
-      <header className="sticky top-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-4 shadow-sm">
-        <div className="max-w-4xl mx-auto">
-          <div className="ml-10 md:ml-0 flex justify-between items-center">
-            <div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white">My Routines</h1>
-              <p className="text-xs text-gray-500 mt-0.5">Manage daily habits and preparations</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowTemplates(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-xl hover:bg-purple-600 transition"
-              >
-                <Lightbulb size={18} />
-                Templates
-              </button>
-              <button
-                onClick={() => handleOpenModal()}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition"
-              >
-                <Plus size={18} />
-                Add Routine
-              </button>
-            </div>
+      {/* Sticky Header - Mobile Friendly */}
+      <div className="sticky top-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border-b border-gray-100 dark:border-gray-800 px-4 pt-3 pb-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-400 bg-clip-text text-transparent">Routines</h1>
+            <p className="text-xs text-gray-500 mt-0.5">Daily habits & preparations</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowTemplates(true)}
+              className="flex items-center justify-center w-10 h-10 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 active:scale-95 transition-transform"
+              aria-label="Templates"
+            >
+              <Lightbulb size={20} />
+            </button>
+            <button
+              onClick={() => handleOpenModal()}
+              className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-500 text-white shadow-md active:scale-95 transition-transform"
+              aria-label="Add Routine"
+            >
+              <Plus size={22} />
+            </button>
           </div>
         </div>
-      </header>
+      </div>
 
-      <div className="max-w-4xl mx-auto p-4 space-y-5">
-        {/* Stats Cards */}
+      <div className="p-4 space-y-5">
+        {/* Stats Cards - Touch friendly */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform">
             <div className="flex items-center gap-2 mb-2">
-              <Clock size={18} className="text-blue-500" />
+              <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-full">
+                <Clock size={16} className="text-blue-500" />
+              </div>
               <span className="text-2xl font-bold text-gray-900 dark:text-white">{totalRoutinesTime}</span>
             </div>
-            <p className="text-xs text-gray-500">Total minutes daily</p>
+            <p className="text-xs text-gray-500">Total daily mins</p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm active:scale-[0.98] transition-transform">
             <div className="flex items-center gap-2 mb-2">
-              <Award size={18} className="text-orange-500" />
+              <div className="p-1.5 bg-orange-100 dark:bg-orange-900/30 rounded-full">
+                <Award size={16} className="text-orange-500" />
+              </div>
               <span className="text-2xl font-bold text-gray-900 dark:text-white">{routines.length}</span>
             </div>
             <p className="text-xs text-gray-500">Active routines</p>
           </div>
         </div>
 
-        {/* Morning Prep Summary */}
+        {/* Morning Prep Summary - Mobile Card */}
         {morningRoutines.length > 0 && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-linear-to-r from-orange-500 to-pink-500 rounded-2xl p-5 text-white"
+            className="bg-gradient-to-r from-orange-500 to-pink-500 rounded-2xl p-5 text-white shadow-lg"
           >
             <div className="flex items-center justify-between">
               <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Sun size={20} />
-                  <h2 className="font-semibold">Morning Preparation</h2>
+                <div className="flex items-center gap-2 mb-1">
+                  <Sun size={18} />
+                  <h2 className="font-semibold text-sm">Morning Prep</h2>
                 </div>
-                <p className="text-3xl font-bold">{totalPrepTime} min</p>
-                <p className="text-sm opacity-90 mt-1">{morningRoutines.length} routines before class</p>
+                <p className="text-3xl font-bold tracking-tight">{totalPrepTime} min</p>
+                <p className="text-xs opacity-90 mt-1">{morningRoutines.length} routines before class</p>
               </div>
-              <TrendingUp size={40} className="opacity-80" />
+              <TrendingUp size={36} className="opacity-80" />
             </div>
           </motion.div>
         )}
 
-        {/* Time-block Visual Schedule */}
+        {/* Routines List with Drag & Drop - Mobile Optimized */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="font-semibold text-gray-900 dark:text-white">Daily Schedule</h2>
-            <p className="text-xs text-gray-500">Drag to reorder your routines</p>
+          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center">
+            <div>
+              <h2 className="font-semibold text-gray-900 dark:text-white">All Routines</h2>
+              <p className="text-xs text-gray-400">Drag handle to reorder</p>
+            </div>
+            <span className="text-xs text-gray-400">{orderedRoutines.length} items</span>
           </div>
-          <div className="p-4">
-            <div className="space-y-2">
-              {timeBlocks.map((time, idx) => {
-                const routineAtTime = getRoutinesForTimeBlock(idx)[0];
-                if (!routineAtTime && idx > orderedRoutines.length - 1) return null;
-                
-                return (
-                  <div
-                    key={time}
-                    className={`flex items-center gap-3 p-3 rounded-xl transition ${
-                      routineAtTime ? 'bg-gray-50 dark:bg-gray-700/30' : 'bg-gray-50/50 dark:bg-gray-800/30'
-                    }`}
-                  >
-                    <div className="w-16 text-sm font-mono text-gray-500">{time}</div>
-                    <div className="flex-1">
-                      {routineAtTime ? (
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium text-gray-900 dark:text-white">{routineAtTime.title}</p>
-                            <p className="text-xs text-gray-400">{routineAtTime.durationMinutes} min</p>
-                          </div>
-                          <GripVertical size={16} className="text-gray-400 cursor-move" />
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            setSelectedTimeSlot(idx);
-                            handleOpenModal();
-                          }}
-                          className="text-sm text-blue-500 hover:underline"
-                        >
-                          + Add routine here
-                        </button>
+
+          <Reorder.Group axis="y" values={orderedRoutines} onReorder={handleReorder} className="divide-y divide-gray-100 dark:divide-gray-700">
+            {orderedRoutines.map((routine) => (
+              <Reorder.Item key={routine.id} value={routine} className="p-4 active:bg-gray-50 dark:active:bg-gray-700/50 transition-colors">
+                <div className="flex items-center gap-3">
+                  {/* Drag Handle - Large touch area */}
+                  <div className="flex-shrink-0 p-1 -ml-1 touch-none">
+                    <GripVertical size={20} className="text-gray-400" />
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <h3 className="font-semibold text-gray-900 dark:text-white text-base truncate max-w-[160px]">{routine.title}</h3>
+                      {routine.affectsWakeUp && (
+                        <span className="text-xs bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Sun size={10} /> Wake
+                        </span>
                       )}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Routines List with Drag & Drop */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="font-semibold text-gray-900 dark:text-white">All Routines</h2>
-            <p className="text-xs text-gray-500">Drag to reorder</p>
-          </div>
-
-          <Reorder.Group axis="y" values={orderedRoutines} onReorder={handleReorder} className="divide-y divide-gray-200 dark:divide-gray-700">
-            {orderedRoutines.map((routine) => (
-              <Reorder.Item key={routine.id} value={routine} className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition group cursor-move">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3 flex-1">
-                    <GripVertical size={16} className="text-gray-400" />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <h3 className="font-semibold text-gray-900 dark:text-white">{routine.title}</h3>
-                        {routine.affectsWakeUp && (
-                          <span className="text-xs bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 px-2 py-0.5 rounded-full flex items-center gap-1">
-                            <Sun size={10} /> Wake-up
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-gray-500">
-                        <span className="flex items-center gap-1">
-                          <Clock size={12} />
-                          {routine.durationMinutes} min
-                        </span>
-                        <span className="flex items-center gap-1">
-                          {getScheduleIcon(routine)}
-                          {getScheduleText(routine)}
-                        </span>
-                      </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <Clock size={12} />
+                        {routine.durationMinutes} min
+                      </span>
+                      <span className="flex items-center gap-1">
+                        {getScheduleIcon(routine)}
+                        <span className="truncate max-w-[130px]">{getScheduleText(routine)}</span>
+                      </span>
                     </div>
                   </div>
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                  
+                  {/* Action Buttons - Mobile friendly tap targets */}
+                  <div className="flex gap-1">
                     <button
                       onClick={() => handleOpenModal(routine)}
-                      className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition"
+                      className="p-2 text-blue-500 active:bg-blue-50 dark:active:bg-blue-900/20 rounded-full transition-colors"
+                      aria-label="Edit"
                     >
-                      <Edit size={16} />
+                      <Edit size={18} />
                     </button>
                     <button
                       onClick={() => handleDelete(routine.id, routine.title)}
-                      className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
+                      className="p-2 text-red-500 active:bg-red-50 dark:active:bg-red-900/20 rounded-full transition-colors"
+                      aria-label="Delete"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={18} />
                     </button>
                   </div>
                 </div>
@@ -388,137 +347,143 @@ export default function RoutineManager() {
           </Reorder.Group>
 
           {orderedRoutines.length === 0 && (
-            <div className="p-12 text-center">
-              <div className="text-6xl mb-4">🕐</div>
-              <p className="text-gray-400">No routines yet</p>
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-3">
+                <Clock size={28} className="text-gray-400" />
+              </div>
+              <p className="text-gray-400 font-medium">No routines yet</p>
               <button
                 onClick={() => setShowTemplates(true)}
-                className="mt-2 text-blue-500 text-sm"
+                className="mt-2 text-blue-500 text-sm font-medium"
               >
-                Browse templates to get started
+                Browse templates →
               </button>
             </div>
           )}
         </div>
 
-        {/* Info Card */}
+        {/* Info Card - Compact */}
         <div className="bg-blue-50 dark:bg-blue-900/20 rounded-2xl p-4">
           <div className="flex items-start gap-3">
-            <Bell className="text-blue-500 mt-0.5" size={18} />
+            <Bell className="text-blue-500 mt-0.5 flex-shrink-0" size={18} />
             <div>
               <h3 className="font-semibold text-gray-900 dark:text-white text-sm">About Routines</h3>
-              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                Routines marked as <strong>"Affects wake-up"</strong> will be included in your morning preparation calculation.
-                Mochi uses this to suggest the best time to wake up for your first class.
+              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">
+                Routines marked as <strong>"Wake-up"</strong> are included in your morning preparation calculation.
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Templates Modal */}
+      {/* Templates Bottom Sheet */}
       <AnimatePresence>
         {showTemplates && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            className="fixed inset-0 bg-black/60 flex items-end justify-center z-50"
             onClick={() => setShowTemplates(false)}
           >
             <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="bg-white dark:bg-gray-800 rounded-t-3xl w-full max-w-md overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Routine Templates</h2>
-                <button onClick={() => setShowTemplates(false)}>
-                  <X size={24} className="text-gray-500" />
+              <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Templates</h2>
+                <button onClick={() => setShowTemplates(false)} className="p-2 -mr-2 active:bg-gray-100 dark:active:bg-gray-700 rounded-full">
+                  <X size={22} className="text-gray-500" />
                 </button>
               </div>
-              <div className="space-y-2">
+              
+              <div className="p-4 space-y-2 max-h-[70vh] overflow-y-auto">
                 {TEMPLATES.map((template) => (
                   <button
                     key={template.title}
                     onClick={() => handleUseTemplate(template)}
-                    className="w-full p-3 flex items-center gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition text-left"
+                    className="w-full p-3 flex items-center gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl active:bg-gray-100 dark:active:bg-gray-700 transition-colors text-left"
                   >
-                    <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-500">
+                    <div className={`p-2 rounded-full ${template.color}`}>
                       {template.icon}
                     </div>
                     <div className="flex-1">
                       <p className="font-medium text-gray-900 dark:text-white">{template.title}</p>
                       <p className="text-xs text-gray-500">{template.durationMinutes} min • {template.affectsWakeUp ? 'Morning' : 'Anytime'}</p>
                     </div>
-                    <Plus size={16} className="text-gray-400" />
+                    <ChevronRight size={18} className="text-gray-400" />
                   </button>
                 ))}
+                
+                <button
+                  onClick={() => {
+                    setShowTemplates(false);
+                    handleOpenModal();
+                  }}
+                  className="w-full mt-4 p-3 text-center text-blue-500 font-medium border border-blue-200 dark:border-blue-800 rounded-xl active:bg-blue-50 dark:active:bg-blue-900/20 transition-colors"
+                >
+                  + Create Custom Routine
+                </button>
               </div>
-              <button
-                onClick={() => {
-                  setShowTemplates(false);
-                  handleOpenModal();
-                }}
-                className="mt-4 w-full p-3 text-center text-blue-500 border border-blue-500 rounded-xl hover:bg-blue-50 transition"
-              >
-                Create Custom Routine
-              </button>
+              
+              {/* Safe area spacer for bottom sheet */}
+              <div className="h-2" />
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Add/Edit Modal - Same as before */}
+      {/* Add/Edit Modal - Bottom Sheet Style */}
       <AnimatePresence>
         {showModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto"
+            className="fixed inset-0 bg-black/60 flex items-end justify-center z-50"
             onClick={() => setShowModal(false)}
           >
             <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="bg-white dark:bg-gray-800 rounded-t-3xl w-full max-w-lg overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                    {editingRoutine ? 'Edit Routine' : 'Add New Routine'}
-                  </h2>
-                </div>
-                <button onClick={() => setShowModal(false)}>
-                  <X size={24} className="text-gray-500" />
+              <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  {editingRoutine ? 'Edit Routine' : 'New Routine'}
+                </h2>
+                <button onClick={() => setShowModal(false)} className="p-2 -mr-2 active:bg-gray-100 dark:active:bg-gray-700 rounded-full">
+                  <X size={22} className="text-gray-500" />
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form onSubmit={handleSubmit} className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
                 <div>
-                  <label className="block text-sm font-medium mb-1">Routine Title *</label>
+                  <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Title *</label>
                   <input
                     type="text"
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
-                    placeholder="e.g., Morning Meditation, Shower, Breakfast"
+                    className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., Morning Meditation"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-1">Duration (minutes) *</label>
+                  <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Duration (minutes) *</label>
                   <input
                     type="number"
                     value={formData.durationMinutes}
                     onChange={(e) => setFormData({ ...formData, durationMinutes: parseInt(e.target.value) || 0 })}
-                    className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
+                    className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white"
                     min="1"
                     max="240"
                     required
@@ -526,7 +491,7 @@ export default function RoutineManager() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Schedule Type *</label>
+                  <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Schedule</label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
                       { value: 'daily', label: 'Daily', icon: <Repeat size={16} /> },
@@ -542,8 +507,8 @@ export default function RoutineManager() {
                           days: option.value === 'weekly' ? formData.days : [],
                           onceDate: option.value === 'once' ? formData.onceDate : ''
                         })}
-                        className={`p-3 rounded-xl flex flex-col items-center gap-1 transition ${formData.scheduleType === option.value
-                            ? 'bg-blue-500 text-white'
+                        className={`py-3 rounded-xl flex flex-col items-center gap-1 transition active:scale-95 ${formData.scheduleType === option.value
+                            ? 'bg-blue-500 text-white shadow-md'
                             : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
                           }`}
                       >
@@ -556,17 +521,17 @@ export default function RoutineManager() {
 
                 {formData.scheduleType === 'weekly' && (
                   <div>
-                    <label className="block text-sm font-medium mb-2">Select Days</label>
+                    <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Days</label>
                     <div className="grid grid-cols-2 gap-2">
                       {WEEKDAYS.map(day => (
-                        <label key={day} className="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <label key={day} className="flex items-center gap-2 p-2 rounded-lg cursor-pointer active:bg-gray-50 dark:active:bg-gray-700">
                           <input
                             type="checkbox"
                             checked={formData.days?.includes(day) || false}
                             onChange={() => handleDayToggle(day)}
-                            className="rounded border-gray-300"
+                            className="w-4 h-4 rounded border-gray-300"
                           />
-                          <span className="text-sm capitalize">{day}</span>
+                          <span className="text-sm capitalize">{day.slice(0, 3)}</span>
                         </label>
                       ))}
                     </div>
@@ -575,48 +540,51 @@ export default function RoutineManager() {
 
                 {formData.scheduleType === 'once' && (
                   <div>
-                    <label className="block text-sm font-medium mb-1">Date</label>
+                    <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Date</label>
                     <input
                       type="date"
                       value={formData.onceDate}
                       onChange={(e) => setFormData({ ...formData, onceDate: e.target.value })}
-                      className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
+                      className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white"
                       required
                     />
                   </div>
                 )}
 
-                <div>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.affectsWakeUp}
-                      onChange={(e) => setFormData({ ...formData, affectsWakeUp: e.target.checked })}
-                      className="w-5 h-5 rounded border-gray-300"
-                    />
-                    <span className="text-sm font-medium">Affects wake-up time</span>
+                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/30 rounded-xl">
+                  <input
+                    type="checkbox"
+                    id="affectsWakeUp"
+                    checked={formData.affectsWakeUp}
+                    onChange={(e) => setFormData({ ...formData, affectsWakeUp: e.target.checked })}
+                    className="w-5 h-5 rounded border-gray-300"
+                  />
+                  <label htmlFor="affectsWakeUp" className="flex-1 text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Affects wake-up time
                   </label>
-                  <p className="text-xs text-gray-500 mt-1 ml-8">
-                    Include this routine in morning preparation calculation
-                  </p>
                 </div>
+                <p className="text-xs text-gray-500 -mt-2 ml-8">
+                  Include in morning preparation calculation
+                </p>
 
-                <div className="flex gap-3 pt-2">
+                <div className="flex gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => setShowModal(false)}
-                    className="flex-1 py-2 bg-gray-200 dark:bg-gray-700 rounded-xl hover:bg-gray-300 transition"
+                    className="flex-1 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl active:bg-gray-200 dark:active:bg-gray-600 font-medium transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition"
+                    className="flex-1 py-3 bg-blue-500 text-white rounded-xl shadow-md active:bg-blue-600 font-medium transition-colors"
                   >
                     {editingRoutine ? 'Update' : 'Add'} Routine
                   </button>
                 </div>
               </form>
+              
+              <div className="h-2" />
             </motion.div>
           </motion.div>
         )}
