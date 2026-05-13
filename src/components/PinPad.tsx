@@ -64,7 +64,7 @@ export default function PinPad({
   ];
   
   return (
-    <div className="flex flex-col items-center justify-center min-h-100 p-6">
+    <div className="flex flex-col items-center justify-center min-h-80 p-6">
       {/* Title */}
       <div className="text-center mb-8">
         <motion.div
