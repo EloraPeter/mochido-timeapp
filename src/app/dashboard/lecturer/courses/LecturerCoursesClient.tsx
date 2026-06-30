@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLecturerCourses } from '@/hooks/useLecturerCourses';
+import { useCourseService } from '@/hooks/useCourseService';
 import BottomTabBar from '@/components/BottomTabBar';
 import MobileSidebar from '@/components/MobileSidebar';
 import { useCustomAlert } from '@/hooks/useCustomAlert';
@@ -22,7 +23,9 @@ import {
   ChevronRight,
   X,
   Eye,
-  GripVertical
+  GripVertical,
+  ShieldCheck,
+  UserCheck
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -51,12 +54,14 @@ const DAY_ABBREVS: Record<string, string> = {
 export default function LecturerCoursesClient() {
   const { user } = useAuth();
   const { courses, loading, addCourse, updateCourse, deleteCourse } = useLecturerCourses();
+  const { allCatalogs, lecturerCourses, claimCourse, refresh: refreshCatalogs, loading: catalogLoading } = useCourseService();
   const [showModal, setShowModal] = useState(false);
   const [editingCourse, setEditingCourse] = useState<any>(null);
   const { success, error, confirm, toast } = useCustomAlert();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState<any>(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [claimingId, setClaimingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<CourseFormData>({
     name: '',
     code: '',
@@ -97,6 +102,57 @@ export default function LecturerCoursesClient() {
     setShowModal(true);
   };
 
+  // Catalog entries that are still unverified and have no lecturer course
+  // offering yet - these are courses students created themselves (via
+  // "Create Course" on their own schedule) that no lecturer has claimed.
+  // Claiming one verifies it and lets this lecturer set up its real
+  // schedule, instead of leaving it permanently unverified.
+  const unclaimedCatalogs = useMemo(() => {
+    const claimedCatalogIds = new Set(lecturerCourses.map(lc => lc.catalogId));
+    return allCatalogs.filter(c => !c.isVerified && !claimedCatalogIds.has(c.id));
+  }, [allCatalogs, lecturerCourses]);
+
+  const handleClaim = async (catalogId: string, courseTitle: string) => {
+    const confirmed = await confirm(`Claim "${courseTitle}"? This will mark it as verified and let you set its schedule.`);
+    if (!confirmed) return;
+
+    setClaimingId(catalogId);
+    try {
+      const claimed = await claimCourse(catalogId);
+      // claimCourse() already created a LecturerCourse row for this catalog
+      // entry (with an empty schedule). Open the edit form against *that*
+      // row so submitting calls updateCourse, not addCourse - otherwise
+      // we'd end up with two LecturerCourse rows for the same catalog id.
+      const catalog = allCatalogs.find(c => c.id === catalogId);
+      setEditingCourse({
+        id: claimed.id,
+        catalogId: claimed.catalogId,
+        name: catalog?.title || courseTitle,
+        code: catalog?.courseCode || '',
+        days: claimed.days || [],
+        startTime: claimed.startTime || '09:00',
+        endTime: claimed.endTime || '10:30',
+        location: claimed.location || '',
+      });
+      setFormData({
+        name: catalog?.title || courseTitle,
+        code: catalog?.courseCode || '',
+        days: claimed.days || [],
+        startTime: claimed.startTime || '09:00',
+        endTime: claimed.endTime || '10:30',
+        location: claimed.location || '',
+        description: catalog?.description || '',
+        capacity: 50
+      });
+      success(`"${courseTitle}" claimed and verified. Set its schedule below.`);
+      setShowModal(true);
+    } catch (err) {
+      error((err as Error).message || 'Failed to claim course');
+    } finally {
+      setClaimingId(null);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -112,6 +168,11 @@ export default function LecturerCoursesClient() {
       await addCourse(formData);
       success('Course created!');
     }
+
+    // A normal "New Course" submission (not just a claim) can also match
+    // an existing unverified catalog entry by code via addCourse's own
+    // logic - either way, refresh so the unclaimed-courses list stays accurate.
+    refreshCatalogs();
 
     setShowModal(false);
     setEditingCourse(null);
@@ -155,7 +216,7 @@ export default function LecturerCoursesClient() {
   const coursesWithLocation = courses.filter(c => c.location).length;
 
 
-  if (loading) {
+  if (loading || catalogLoading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-16">
         <MobileSidebar />
@@ -250,6 +311,51 @@ export default function LecturerCoursesClient() {
             <p className="text-xs text-gray-500">Total Capacity</p>
           </div>
         </div>
+
+        {/* Unclaimed Courses - students created these themselves under a
+            course code with no matching lecturer offering yet. Claiming one
+            verifies it for every enrolled student and lets you set its
+            schedule, instead of it silently staying unverified forever. */}
+        {unclaimedCatalogs.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden border border-amber-200 dark:border-amber-800">
+            <div className="p-4 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 flex items-center gap-2">
+              <ShieldCheck size={18} className="text-amber-600 dark:text-amber-400" />
+              <h2 className="font-bold text-gray-900 dark:text-white">Unclaimed Courses</h2>
+              <span className="text-xs bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 px-2 py-0.5 rounded-full">
+                {unclaimedCatalogs.length}
+              </span>
+            </div>
+            <p className="px-4 pt-3 text-xs text-gray-500 dark:text-gray-400">
+              Students added these course codes themselves. Claim one if it's yours - it'll be marked verified for everyone enrolled.
+            </p>
+            <div className="p-4 space-y-2">
+              {unclaimedCatalogs.map(catalog => (
+                <div
+                  key={catalog.id}
+                  className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-gray-900 dark:text-white">{catalog.title}</span>
+                      <span className="text-xs text-gray-500 font-mono">{catalog.courseCode}</span>
+                    </div>
+                    {catalog.description && (
+                      <p className="text-xs text-gray-500 mt-0.5">{catalog.description}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleClaim(catalog.id, catalog.title)}
+                    disabled={claimingId === catalog.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition disabled:opacity-50"
+                  >
+                    <UserCheck size={14} />
+                    {claimingId === catalog.id ? 'Claiming...' : 'Claim'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Weekly Schedule View - Mobile friendly */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm ">
