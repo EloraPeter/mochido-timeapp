@@ -41,7 +41,11 @@ export default function MochiHamster({
   const expression = HAMSTER_EXPRESSIONS[mood];
   const animation = expressionAnimations[mood as keyof typeof expressionAnimations] || expressionAnimations.HAPPY;
   
-  const bgClasses = expression.backgroundColor.split(' ').map(c => `bg-${c}`).join(' ');
+  // expression.backgroundColor is already a complete, valid pair of Tailwind
+  // gradient classes (e.g. "from-yellow-400 to-amber-500"). Prefixing each
+  // word with "bg-" produced invalid classes like "bg-from-yellow-400" that
+  // don't exist, so Mochi's gradient background never actually rendered.
+  const bgClasses = expression.backgroundColor;
   
   // Draw ASCII hamster face as fallback
   const renderAsciiFace = () => {

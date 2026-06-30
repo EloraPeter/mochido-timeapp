@@ -75,7 +75,7 @@ export default function TodaySchedule({ courses }: TodayScheduleProps) {
                                     )}
                                 </div>
                             </div>
-                            <Link href="/dashboard/student/classes">
+                            <Link href="/dashboard/student/courses">
                                 <ChevronRight size={18} className="text-gray-400" />
                             </Link>
                         </div>

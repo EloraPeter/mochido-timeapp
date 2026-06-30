@@ -2,7 +2,7 @@
 
 'use client';
 
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, useRef, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, AlertCircle, XCircle, Info, X } from 'lucide-react';
 
@@ -34,8 +34,12 @@ export function AlertProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [toastState, setToastState] = useState<{ message: string; type: AlertType; id: number } | null>(null);
   
-  // For confirm promise
-  let confirmResolver: ((value: boolean) => void) | null = null;
+  // Use a ref so the resolver survives the re-render that confirm() triggers
+  // via setIsOpen/setAlertState. A plain `let` here gets reset to null on
+  // every render, so handleConfirm/handleCancel (which run in a *later*
+  // render than the one that called confirm()) would never see it, and the
+  // confirm() promise would never resolve when Confirm/Cancel is clicked.
+  const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
   
   const alert = (options: AlertOptions) => {
     setAlertState(options);
@@ -46,7 +50,7 @@ export function AlertProvider({ children }: { children: ReactNode }) {
     setAlertState({ ...options, showCancel: true });
     setIsOpen(true);
     return new Promise((resolve) => {
-      confirmResolver = resolve;
+      confirmResolverRef.current = resolve;
     });
   };
   
@@ -60,9 +64,9 @@ export function AlertProvider({ children }: { children: ReactNode }) {
   
   const closeAlert = () => {
     setIsOpen(false);
-    if (confirmResolver) {
-      confirmResolver(false);
-      confirmResolver = null;
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(false);
+      confirmResolverRef.current = null;
     }
     setAlertState(null);
   };
@@ -71,9 +75,9 @@ export function AlertProvider({ children }: { children: ReactNode }) {
     if (alertState?.onConfirm) {
       alertState.onConfirm();
     }
-    if (confirmResolver) {
-      confirmResolver(true);
-      confirmResolver = null;
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(true);
+      confirmResolverRef.current = null;
     }
     setIsOpen(false);
     setAlertState(null);
@@ -83,9 +87,9 @@ export function AlertProvider({ children }: { children: ReactNode }) {
     if (alertState?.onCancel) {
       alertState.onCancel();
     }
-    if (confirmResolver) {
-      confirmResolver(false);
-      confirmResolver = null;
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(false);
+      confirmResolverRef.current = null;
     }
     setIsOpen(false);
     setAlertState(null);

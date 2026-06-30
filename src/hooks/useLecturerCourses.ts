@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { getItems, addItem, updateItem, deleteItem } from '@/lib/db/indexedDB';
 import { STORES } from '@/lib/db/schema';
 import { getCurrentUserId } from '@/lib/auth/pinAuth';
-import type { CourseCatalog, LecturerCourse } from '@/lib/db/schema';
+import type { CourseCatalog, LecturerCourse, Enrollment } from '@/lib/db/schema';
 
 export interface LecturerCourseWithDetails {
   id: string;
@@ -81,6 +81,18 @@ export function useLecturerCourses() {
         createdAt: new Date().toISOString()
       };
       await addItem(STORES.courseCatalog, catalog);
+    } else if (!catalog.isVerified) {
+      // A student created this catalog entry first and it's still
+      // unverified. A lecturer creating a course with the same code is
+      // exactly the "claim" case promised to students elsewhere in the app
+      // ("if a lecturer creates a course with this code, it will
+      // automatically become verified") - so verify it now and link it to
+      // this lecturer, rather than silently leaving it unverified forever.
+      await updateItem(STORES.courseCatalog, catalog.id, {
+        isVerified: true,
+        lecturerId: userId
+      });
+      catalog = { ...catalog, isVerified: true, lecturerId: userId };
     }
     
     // Create lecturer course
@@ -97,6 +109,16 @@ export function useLecturerCourses() {
     };
     
     await addItem(STORES.lecturerCourses, newCourse);
+
+    // Link any existing student enrollments in this catalog entry to the
+    // lecturer course offering that now exists for it.
+    const existingEnrollments = await getItems<Enrollment>(STORES.enrollments, 'catalogId', catalog.id);
+    for (const enrollment of existingEnrollments) {
+      if (!enrollment.lecturerCourseId) {
+        await updateItem(STORES.enrollments, enrollment.id, { lecturerCourseId: newCourse.id });
+      }
+    }
+
     await loadCourses();
   }, [userId, loadCourses]);
   

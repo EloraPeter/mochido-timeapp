@@ -2,6 +2,7 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { MochiExpression } from './hamsterExpressions';
@@ -64,12 +65,19 @@ export default function MochiMessage({
   autoDismiss = 5000 
 }: MochiMessageProps) {
   
-  // Auto-dismiss
-  if (autoDismiss && isVisible && onDismiss) {
-    setTimeout(() => {
+  // Auto-dismiss. This must live in a useEffect, not the render body -
+  // calling setTimeout directly during render scheduled a brand new timer
+  // on every re-render without ever clearing the previous one, which could
+  // fire onDismiss multiple times and leaked timers while mounted.
+  useEffect(() => {
+    if (!autoDismiss || !isVisible || !onDismiss) return;
+
+    const timer = setTimeout(() => {
       onDismiss();
     }, autoDismiss);
-  }
+
+    return () => clearTimeout(timer);
+  }, [autoDismiss, isVisible, onDismiss]);
   
   return (
     <AnimatePresence>

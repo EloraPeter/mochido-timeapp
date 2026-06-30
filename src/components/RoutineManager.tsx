@@ -217,8 +217,8 @@ export default function RoutineManager() {
       {/* Sticky Header - Mobile Friendly */}
       <div className="sticky top-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border-b border-gray-100 dark:border-gray-800 px-4 pt-3 pb-2">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-400 bg-clip-text text-transparent">Routines</h1>
+          <div className="pl-8">
+            <h1 className="text-2xl font-bold bg-linear-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-400 bg-clip-text text-transparent">Routines</h1>
             <p className="text-xs text-gray-500 mt-0.5">Daily habits & preparations</p>
           </div>
           <div className="flex gap-2">
@@ -268,7 +268,7 @@ export default function RoutineManager() {
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-gradient-to-r from-orange-500 to-pink-500 rounded-2xl p-5 text-white shadow-lg"
+            className="bg-linear-to-r from-orange-500 to-pink-500 rounded-2xl p-5 text-white shadow-lg"
           >
             <div className="flex items-center justify-between">
               <div>
@@ -299,13 +299,13 @@ export default function RoutineManager() {
               <Reorder.Item key={routine.id} value={routine} className="p-4 active:bg-gray-50 dark:active:bg-gray-700/50 transition-colors">
                 <div className="flex items-center gap-3">
                   {/* Drag Handle - Large touch area */}
-                  <div className="flex-shrink-0 p-1 -ml-1 touch-none">
+                  <div className="shrink-0 p-1 -ml-1 touch-none">
                     <GripVertical size={20} className="text-gray-400" />
                   </div>
                   
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <h3 className="font-semibold text-gray-900 dark:text-white text-base truncate max-w-[160px]">{routine.title}</h3>
+                      <h3 className="font-semibold text-gray-900 dark:text-white text-base truncate max-w-40">{routine.title}</h3>
                       {routine.affectsWakeUp && (
                         <span className="text-xs bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 px-2 py-0.5 rounded-full flex items-center gap-1">
                           <Sun size={10} /> Wake
@@ -319,7 +319,7 @@ export default function RoutineManager() {
                       </span>
                       <span className="flex items-center gap-1">
                         {getScheduleIcon(routine)}
-                        <span className="truncate max-w-[130px]">{getScheduleText(routine)}</span>
+                        <span className="truncate max-w-32.5">{getScheduleText(routine)}</span>
                       </span>
                     </div>
                   </div>
@@ -365,7 +365,7 @@ export default function RoutineManager() {
         {/* Info Card - Compact */}
         <div className="bg-blue-50 dark:bg-blue-900/20 rounded-2xl p-4">
           <div className="flex items-start gap-3">
-            <Bell className="text-blue-500 mt-0.5 flex-shrink-0" size={18} />
+            <Bell className="text-blue-500 mt-0.5 shrink-0" size={18} />
             <div>
               <h3 className="font-semibold text-gray-900 dark:text-white text-sm">About Routines</h3>
               <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">

@@ -148,7 +148,6 @@ export default function LecturerDashboardClient() {
         <div className="max-w-6xl mx-auto">
           <LecturerWelcomeHeader
             name={getDisplayName()}
-            title={user?.title}
             totalCourses={stats.totalCourses}
             totalStudents={stats.totalStudents}
             mood={mood}

@@ -99,27 +99,40 @@ export default function SettingsClient() {
         if (user?.id) loadStats();
     }, [user]);
 
-    // Check dark mode preference
-    useEffect(() => {
-        const isDark = localStorage.getItem('theme') === 'dark' ||
-            (window.matchMedia('(prefers-color-scheme: dark)').matches && !localStorage.getItem('theme'));
-        setIsDarkMode(isDark);
-        if (isDark) {
-            document.documentElement.classList.add('dark');
-        }
-    }, []);
+   // Check theme preference
+useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
 
-    const toggleDarkMode = () => {
-        const newMode = !isDarkMode;
-        setIsDarkMode(newMode);
-        if (newMode) {
-            document.documentElement.classList.add('dark');
-            localStorage.setItem('theme', 'dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-            localStorage.setItem('theme', 'light');
-        }
-    };
+    // Default = light mode
+    const isDark =
+        savedTheme === 'dark' ||
+        (savedTheme === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+    setIsDarkMode(isDark);
+
+    if (isDark) {
+        document.documentElement.classList.add('dark');
+    } else {
+        document.documentElement.classList.remove('dark');
+    }
+}, []);
+
+// Toggle between light and dark
+const toggleDarkMode = () => {
+    const newMode = !isDarkMode;
+
+    setIsDarkMode(newMode);
+
+    if (newMode) {
+        document.documentElement.classList.add('dark');
+        localStorage.setItem('theme', 'dark');
+    } else {
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('theme', 'light');
+    }
+};
+
 
     const handleNameUpdate = async () => {
         if (!newName.trim()) return;
@@ -206,155 +219,11 @@ export default function SettingsClient() {
         setShowExportData(false);
     };
 
-    const handleImportData = async (e: React.FormEvent) => {
-        e.preventDefault();
-        console.log('🔵 Import function called');
-
-        if (!importFile) {
-            console.log('❌ No file selected');
-            setImportStatus({ type: 'error', message: 'Please select a file first' });
-            return;
-        }
-
-        console.log('📁 File selected:', importFile.name, importFile.size);
-        setImportStatus({ type: 'success', message: 'Reading file...' });
-
-        const reader = new FileReader();
-
-        reader.onload = async (event) => {
-            console.log('📖 File loaded, processing...');
-            try {
-                const content = event.target?.result as string;
-                console.log('📄 File content length:', content.length);
-
-                const imported = JSON.parse(content);
-                console.log('✅ JSON parsed successfully', imported);
-
-                if (!imported.data) {
-                    throw new Error('Invalid backup file format - missing "data" property');
-                }
-
-                const currentUserId = user?.id;
-                if (!currentUserId) {
-                    throw new Error('No user logged in');
-                }
-
-                console.log('👤 Current user ID:', currentUserId);
-                console.log('📊 Import stats:', {
-                    courses: imported.data.courses?.length || 0,
-                    tasks: imported.data.tasks?.length || 0,
-                    routines: imported.data.routines?.length || 0,
-                    enrollments: imported.data.enrollments?.length || 0
-                });
-
-                // Open database
-                const db = await getDB();
-                console.log('🗄️ Database opened');
-
-                // Create transaction with all stores
-                const tx = db.transaction(
-                    [STORES.courseCatalog, STORES.tasks, STORES.routines, STORES.enrollments],
-                    'readwrite'
-                );
-
-                let importedCount = 0;
-
-                // Import courses
-                if (imported.data.courses && imported.data.courses.length > 0) {
-                    const courseStore = tx.objectStore(STORES.courseCatalog);
-                    for (const course of imported.data.courses) {
-                        const newCourse = {
-                            id: crypto.randomUUID(),
-                            courseCode: course.courseCode,
-                            title: course.title,
-                            description: course.description || '',
-                            createdBy: currentUserId,
-                            isVerified: false,
-                            createdAt: new Date().toISOString()
-                        };
-                        await courseStore.put(newCourse);
-                        importedCount++;
-                        console.log(`  ✅ Imported course: ${newCourse.title}`);
-                    }
-                }
-
-                // Import tasks
-                if (imported.data.tasks && imported.data.tasks.length > 0) {
-                    const taskStore = tx.objectStore(STORES.tasks);
-                    for (const task of imported.data.tasks) {
-                        const newTask = {
-                            id: crypto.randomUUID(),
-                            title: task.title,
-                            dueDate: task.dueDate,
-                            catalogId: task.catalogId,
-                            userId: currentUserId,
-                            isDone: false,
-                            notes: task.notes || '',
-                            priority: task.priority || 'medium',
-                            createdAt: new Date().toISOString(),
-                            status: 'pending',
-                            urgencyScore: 50,
-                            reminderMinutes: [1440, 60, 10, 0]
-                        };
-                        await taskStore.put(newTask);
-                        importedCount++;
-                        console.log(`  ✅ Imported task: ${newTask.title}`);
-                    }
-                }
-
-                // Import routines
-                if (imported.data.routines && imported.data.routines.length > 0) {
-                    const routineStore = tx.objectStore(STORES.routines);
-                    for (const routine of imported.data.routines) {
-                        const newRoutine = {
-                            id: crypto.randomUUID(),
-                            title: routine.title,
-                            durationMinutes: routine.durationMinutes,
-                            scheduleType: routine.scheduleType,
-                            days: routine.days || null,
-                            onceDate: routine.onceDate || null,
-                            affectsWakeUp: routine.affectsWakeUp || false,
-                            userId: currentUserId,
-                            createdAt: new Date().toISOString()
-                        };
-                        await routineStore.put(newRoutine);
-                        importedCount++;
-                        console.log(`  ✅ Imported routine: ${newRoutine.title}`);
-                    }
-                }
-
-                // Note: Enrollments are handled separately when you enroll in courses
-                // We don't import enrollments directly to avoid conflicts
-
-                // Commit transaction
-                await tx.done;
-                console.log(`✅ Transaction committed! Imported ${importedCount} items`);
-
-                setImportStatus({
-                    type: 'success',
-                    message: `Successfully imported ${importedCount} items! Refreshing...`
-                });
-
-                setTimeout(() => {
-                    window.location.reload();
-                }, 2000);
-
-            } catch (error) {
-                console.error('❌ Import error:', error);
-                setImportStatus({
-                    type: 'error',
-                    message: `Import failed: ${(error as Error).message}`
-                });
-            }
-        };
-
-        reader.onerror = (error) => {
-            console.error('❌ FileReader error:', error);
-            setImportStatus({ type: 'error', message: 'Failed to read the file' });
-        };
-
-        reader.readAsText(importFile);
-    };
+    // Note: the actual "Import Data" button below triggers a hidden file
+    // input whose onChange handler does the real import work inline. The
+    // handleImportData function that used to live here was never called by
+    // anything - it was a dead, duplicate reimplementation of the same
+    // logic with the same catalogId-orphaning bug, so it's been removed.
 
     const handleDeleteAllData = async () => {
         if (!user?.id) return;
@@ -688,13 +557,31 @@ export default function SettingsClient() {
 
                                             let importedCount = 0;
 
-                                            // Import courses
+                                            // Import courses. Match existing catalog entries by course
+                                            // code (same approach as useCourseService.findOrCreateCatalog)
+                                            // instead of always minting a new id - otherwise re-importing
+                                            // the same backup duplicates every course, and any task whose
+                                            // catalogId still pointed at the *old* id from the backup file
+                                            // ends up orphaned from a course that no longer exists.
+                                            const catalogIdMap = new Map<string, string>(); // old catalogId -> current catalogId
                                             if (imported.data.courses && imported.data.courses.length > 0) {
                                                 const courseStore = tx.objectStore(STORES.courseCatalog);
+                                                const existingCourses = await courseStore.getAll();
+
                                                 for (const course of imported.data.courses) {
+                                                    const normalizedCode = (course.courseCode || '').toUpperCase().trim();
+                                                    const existing = existingCourses.find(
+                                                        (c: CourseCatalog) => c.courseCode === normalizedCode
+                                                    );
+
+                                                    if (existing) {
+                                                        if (course.id) catalogIdMap.set(course.id, existing.id);
+                                                        continue;
+                                                    }
+
                                                     const newCourse = {
                                                         id: crypto.randomUUID(),
-                                                        courseCode: course.courseCode,
+                                                        courseCode: normalizedCode,
                                                         title: course.title,
                                                         description: course.description || '',
                                                         createdBy: currentUserId,
@@ -702,20 +589,27 @@ export default function SettingsClient() {
                                                         createdAt: new Date().toISOString()
                                                     };
                                                     await courseStore.put(newCourse);
+                                                    existingCourses.push(newCourse as any);
+                                                    if (course.id) catalogIdMap.set(course.id, newCourse.id);
                                                     importedCount++;
                                                     console.log(`  ✅ Imported course: ${newCourse.title}`);
                                                 }
                                             }
 
-                                            // Import tasks
+                                            // Import tasks - remap each task's catalogId through the map
+                                            // above so it points at the course's current id rather than
+                                            // the (now-meaningless) id it had in the backup file.
                                             if (imported.data.tasks && imported.data.tasks.length > 0) {
                                                 const taskStore = tx.objectStore(STORES.tasks);
                                                 for (const task of imported.data.tasks) {
+                                                    const remappedCatalogId = task.catalogId
+                                                        ? (catalogIdMap.get(task.catalogId) || task.catalogId)
+                                                        : task.catalogId;
                                                     const newTask = {
                                                         id: crypto.randomUUID(),
                                                         title: task.title,
                                                         dueDate: task.dueDate,
-                                                        catalogId: task.catalogId,
+                                                        catalogId: remappedCatalogId,
                                                         userId: currentUserId,
                                                         isDone: false,
                                                         notes: task.notes || '',
