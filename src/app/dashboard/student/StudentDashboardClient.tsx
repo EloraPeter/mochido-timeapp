@@ -231,14 +231,6 @@ export default function StudentDashboardClient() {
           onMochiClick={refreshMood}
         />
 
-        {/* Mochi Message */}
-        {/* <MochiMessage
-          message={guiltMessage || (streakDays === 0 ? "Mochi is waiting for you to start your streak! 🌱" : "Tap Mochi for motivation! 🐹")}
-          mood={mood}
-          isVisible={true}
-          onDismiss={guiltMessage ? dismissGuiltMessage : undefined}
-          autoDismiss={5000}
-        /> */}
 
         {/* Wake-Up Time Card */}
         {wakeUpData.time && wakeUpData.firstClass ? (

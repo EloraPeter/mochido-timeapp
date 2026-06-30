@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { getItems, addItem, deleteItem, getItem, updateItem } from '@/lib/db/indexedDB';
 import { STORES } from '@/lib/db/schema';
 import { getCurrentUserId } from '@/lib/auth/pinAuth';
-import type { Course, Enrollment } from '@/lib/db/schema';
+import type { CourseCatalog, Enrollment } from '@/lib/db/schema';
 
 export function useEnrollments() {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
@@ -31,18 +31,18 @@ export function useEnrollments() {
   }, [userId]);
 
   // Enroll in a course
-  const enrollInCourse = useCallback(async (courseId: string) => {
+  const enrollInCourse = useCallback(async (catalogId: string) => {
     if (!userId) throw new Error('Not logged in');
     
     try {
       // Check if already enrolled
-      const existing = enrollments.find(e => e.courseId === courseId);
+      const existing = enrollments.find(e => e.catalogId === catalogId);
       if (existing) return;
       
       const enrollment: Enrollment = {
         id: crypto.randomUUID(),
         studentId: userId,
-        courseId,
+          catalogId: catalogId,
         enrolledAt: new Date().toISOString(),
         status: 'active'
       };
@@ -58,7 +58,7 @@ export function useEnrollments() {
   // Drop a course
   const dropCourse = useCallback(async (courseId: string) => {
     try {
-      const enrollment = enrollments.find(e => e.courseId === courseId);
+      const enrollment = enrollments.find(e => e.catalogId === courseId);
       if (!enrollment) return;
       
       await updateItem(STORES.enrollments, enrollment.id, { status: 'dropped' });
@@ -71,12 +71,12 @@ export function useEnrollments() {
   
   // Check if enrolled in a course
   const isEnrolled = useCallback((courseId: string) => {
-    return enrollments.some(e => e.courseId === courseId);
+    return enrollments.some(e => e.catalogId === courseId);
   }, [enrollments]);
   
   // Get student's enrolled course IDs
   const getEnrolledCourseIds = useCallback(() => {
-    return enrollments.map(e => e.courseId);
+    return enrollments.map(e => e.catalogId);
   }, [enrollments]);
   
   useEffect(() => {

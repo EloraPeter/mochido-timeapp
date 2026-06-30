@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { getItems, updateItem, addItem, deleteItem } from '@/lib/db/indexedDB';
 import { STORES } from '@/lib/db/schema';
 import { getCurrentUserId } from '@/lib/auth/pinAuth';
-import type { Task, Course } from '@/lib/db/schema';
+import type { Task, CourseCatalog } from '@/lib/db/schema';
 
 export function useAssignments() {
   const [assignments, setAssignments] = useState<Task[]>([]);
@@ -27,15 +27,20 @@ export function useAssignments() {
       const allTasks = await getItems<Task>(STORES.tasks);
       
       // Get user's courses
-      const userCourses = await getItems<Course>(STORES.courses, 'userId', userId);
-      const userCourseIds = userCourses.map(c => c.id);
+      const userCourses = await getItems<CourseCatalog>(
+  STORES.courseCatalog,
+  'createdBy',
+  userId
+);
+
+const userCourseIds = userCourses.map(c => c.id);
       
-      // Filter: assignments where courseId matches user's enrolled courses
+      // Filter: assignments where catalogId matches user's enrolled courses
       // AND assignment is not created by the student (different userId)
       const filteredAssignments = allTasks.filter(task => 
-        task.courseId && 
-        task.courseId !== 'general' &&
-        userCourseIds.includes(task.courseId) &&
+        task.catalogId && 
+        task.catalogId !== 'general' &&
+        userCourseIds.includes(task.catalogId) &&
         task.userId !== userId // Assignment created by lecturer, not student
       );
       

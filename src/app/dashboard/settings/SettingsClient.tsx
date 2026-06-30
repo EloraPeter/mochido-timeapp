@@ -99,27 +99,40 @@ export default function SettingsClient() {
         if (user?.id) loadStats();
     }, [user]);
 
-    // Check dark mode preference
-    useEffect(() => {
-        const isDark = localStorage.getItem('theme') === 'dark' ||
-            (window.matchMedia('(prefers-color-scheme: dark)').matches && !localStorage.getItem('theme'));
-        setIsDarkMode(isDark);
-        if (isDark) {
-            document.documentElement.classList.add('dark');
-        }
-    }, []);
+   // Check theme preference
+useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
 
-    const toggleDarkMode = () => {
-        const newMode = !isDarkMode;
-        setIsDarkMode(newMode);
-        if (newMode) {
-            document.documentElement.classList.add('dark');
-            localStorage.setItem('theme', 'dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-            localStorage.setItem('theme', 'light');
-        }
-    };
+    // Default = light mode
+    const isDark =
+        savedTheme === 'dark' ||
+        (savedTheme === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+    setIsDarkMode(isDark);
+
+    if (isDark) {
+        document.documentElement.classList.add('dark');
+    } else {
+        document.documentElement.classList.remove('dark');
+    }
+}, []);
+
+// Toggle between light and dark
+const toggleDarkMode = () => {
+    const newMode = !isDarkMode;
+
+    setIsDarkMode(newMode);
+
+    if (newMode) {
+        document.documentElement.classList.add('dark');
+        localStorage.setItem('theme', 'dark');
+    } else {
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('theme', 'light');
+    }
+};
+
 
     const handleNameUpdate = async () => {
         if (!newName.trim()) return;

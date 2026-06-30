@@ -1,0 +1,746 @@
+diff --git a/src/app/dashboard/settings/SettingsClient.tsx b/src/app/dashboard/settings/SettingsClient.tsx
+index 737b2ba..377b1c6 100644
+--- a/src/app/dashboard/settings/SettingsClient.tsx
++++ b/src/app/dashboard/settings/SettingsClient.tsx
+@@ -259,13 +259,32 @@ export default function SettingsClient() {
+ 
+                 let importedCount = 0;
+ 
+-                // Import courses
++                // Import courses. We match existing catalog entries by course
++                // code (same approach as useCourseService.findOrCreateCatalog)
++                // rather than always minting a new id - otherwise re-importing
++                // the same backup duplicates every course, and any task whose
++                // catalogId still pointed at the *old* id from the backup file
++                // would end up orphaned from a course that no longer exists.
++                const catalogIdMap = new Map<string, string>(); // old catalogId -> current catalogId
+                 if (imported.data.courses && imported.data.courses.length > 0) {
+                     const courseStore = tx.objectStore(STORES.courseCatalog);
++                    const existingCourses = await courseStore.getAll();
++
+                     for (const course of imported.data.courses) {
++                        const normalizedCode = (course.courseCode || '').toUpperCase().trim();
++                        const existing = existingCourses.find(
++                            (c: CourseCatalog) => c.courseCode === normalizedCode
++                        );
++
++                        if (existing) {
++                            // Already have this course - reuse it, don't duplicate.
++                            if (course.id) catalogIdMap.set(course.id, existing.id);
++                            continue;
++                        }
++
+                         const newCourse = {
+                             id: crypto.randomUUID(),
+-                            courseCode: course.courseCode,
++                            courseCode: normalizedCode,
+                             title: course.title,
+                             description: course.description || '',
+                             createdBy: currentUserId,
+@@ -273,20 +292,27 @@ export default function SettingsClient() {
+                             createdAt: new Date().toISOString()
+                         };
+                         await courseStore.put(newCourse);
++                        existingCourses.push(newCourse as any);
++                        if (course.id) catalogIdMap.set(course.id, newCourse.id);
+                         importedCount++;
+                         console.log(`  ✅ Imported course: ${newCourse.title}`);
+                     }
+                 }
+ 
+-                // Import tasks
++                // Import tasks - remap each task's catalogId through the map
++                // built above so it points at the course's current id rather
++                // than the (now-meaningless) id it had in the backup file.
+                 if (imported.data.tasks && imported.data.tasks.length > 0) {
+                     const taskStore = tx.objectStore(STORES.tasks);
+                     for (const task of imported.data.tasks) {
++                        const remappedCatalogId = task.catalogId
++                            ? (catalogIdMap.get(task.catalogId) || task.catalogId)
++                            : task.catalogId;
+                         const newTask = {
+                             id: crypto.randomUUID(),
+                             title: task.title,
+                             dueDate: task.dueDate,
+-                            catalogId: task.catalogId,
++                            catalogId: remappedCatalogId,
+                             userId: currentUserId,
+                             isDone: false,
+                             notes: task.notes || '',
+@@ -330,6 +356,7 @@ export default function SettingsClient() {
+                 await tx.done;
+                 console.log(`✅ Transaction committed! Imported ${importedCount} items`);
+ 
++
+                 setImportStatus({
+                     type: 'success',
+                     message: `Successfully imported ${importedCount} items! Refreshing...`
+diff --git a/src/app/dashboard/student/StudentDashboardClient.tsx b/src/app/dashboard/student/StudentDashboardClient.tsx
+index 1ae62f5..711d287 100644
+--- a/src/app/dashboard/student/StudentDashboardClient.tsx
++++ b/src/app/dashboard/student/StudentDashboardClient.tsx
+@@ -232,13 +232,13 @@ export default function StudentDashboardClient() {
+         />
+ 
+         {/* Mochi Message */}
+-        {/* <MochiMessage
++        <MochiMessage
+           message={guiltMessage || (streakDays === 0 ? "Mochi is waiting for you to start your streak! 🌱" : "Tap Mochi for motivation! 🐹")}
+           mood={mood}
+           isVisible={true}
+           onDismiss={guiltMessage ? dismissGuiltMessage : undefined}
+           autoDismiss={5000}
+-        /> */}
++        />
+ 
+         {/* Wake-Up Time Card */}
+         {wakeUpData.time && wakeUpData.firstClass ? (
+diff --git a/src/app/role-select/page.tsx b/src/app/role-select/page.tsx
+index e69de29..fec5bb2 100644
+--- a/src/app/role-select/page.tsx
++++ b/src/app/role-select/page.tsx
+@@ -0,0 +1,7 @@
++import { redirect } from 'next/navigation';
++
++// This route is superseded by the role-selection step built into /register.
++// Kept as a redirect so any stale links/bookmarks still land somewhere useful.
++export default function RoleSelectPage() {
++  redirect('/register');
++}
+diff --git a/src/components/BottomTabBar.tsx b/src/components/BottomTabBar.tsx
+index 4b94eda..827b350 100644
+--- a/src/components/BottomTabBar.tsx
++++ b/src/components/BottomTabBar.tsx
+@@ -44,7 +44,14 @@ export default function BottomTabBar() {
+     };
+ 
+     const tabs = getTabs();
+-    const isActive = (href: string) => pathname === href || pathname?.startsWith(href);
++    // Tabs whose href is the dashboard root (e.g. "Home") must match exactly -
++    // every other tab's href starts with that same root, so a prefix check
++    // would make Home light up as active on every page.
++    const isActive = (href: string) => {
++        const isRootTab = href === '/dashboard/student' || href === '/dashboard/lecturer';
++        if (isRootTab) return pathname === href;
++        return pathname === href || pathname?.startsWith(href + '/');
++    };
+ 
+     return (
+         <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden">
+diff --git a/src/components/MobileSidebar.tsx b/src/components/MobileSidebar.tsx
+index 6bc39c9..2ec3cac 100644
+--- a/src/components/MobileSidebar.tsx
++++ b/src/components/MobileSidebar.tsx
+@@ -184,7 +184,17 @@ export default function MobileSidebar() {
+                 </p>
+               </div>
+               {navItems.map((item) => {
+-                const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
++                // Strip any query string for comparison - usePathname() never
++                // includes one, so an href like ".../courses?tab=browse" would
++                // otherwise never match and never highlight as active.
++                const itemPath = item.href.split('?')[0];
++                // Root dashboard items ("Dashboard") are a prefix of every
++                // other item's href, so they need an exact match - otherwise
++                // they'd light up as active on every sub-page too.
++                const isRootItem = itemPath === '/dashboard/student' || itemPath === '/dashboard/lecturer';
++                const isActive = isRootItem
++                  ? pathname === itemPath
++                  : pathname === itemPath || pathname?.startsWith(itemPath + '/');
+                 return (
+                   <Link
+                     key={item.href}
+diff --git a/src/components/mochi/MochiHamster.tsx b/src/components/mochi/MochiHamster.tsx
+index a421488..31ffe45 100644
+--- a/src/components/mochi/MochiHamster.tsx
++++ b/src/components/mochi/MochiHamster.tsx
+@@ -41,7 +41,13 @@ export default function MochiHamster({
+   const expression = HAMSTER_EXPRESSIONS[mood];
+   const animation = expressionAnimations[mood as keyof typeof expressionAnimations] || expressionAnimations.HAPPY;
+   
+-  const bgClasses = expression.backgroundColor.split(' ').map(c => `bg-${c}`).join(' ');
++  // expression.backgroundColor is already a complete, valid pair of Tailwind
++  // gradient classes (e.g. "from-yellow-400 to-amber-500"). Prefixing each
++  // word with "bg-" produced invalid classes like "bg-from-yellow-400" that
++  // don't exist, and even correct from-x/to-x strings built via template
++  // interpolation can't be picked up by Tailwind's static class scanner -
++  // so the gradient background was never actually rendering.
++  const bgClasses = expression.backgroundColor;
+   
+   // Draw ASCII hamster face as fallback
+   const renderAsciiFace = () => {
+diff --git a/src/components/mochi/MochiMessage.tsx b/src/components/mochi/MochiMessage.tsx
+index 0a3bf98..43f93ea 100644
+--- a/src/components/mochi/MochiMessage.tsx
++++ b/src/components/mochi/MochiMessage.tsx
+@@ -2,6 +2,7 @@
+ 
+ 'use client';
+ 
++import { useEffect } from 'react';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { cn } from '@/lib/utils';
+ import { MochiExpression } from './hamsterExpressions';
+@@ -64,12 +65,20 @@ export default function MochiMessage({
+   autoDismiss = 5000 
+ }: MochiMessageProps) {
+   
+-  // Auto-dismiss
+-  if (autoDismiss && isVisible && onDismiss) {
+-    setTimeout(() => {
++  // Auto-dismiss. This must live in a useEffect, not the render body - calling
++  // setTimeout directly during render scheduled a brand new timer on every
++  // re-render (e.g. every time a parent state update bubbled down) without ever
++  // clearing the previous one, which could fire onDismiss multiple times and
++  // leaked timers for as long as the component stayed mounted.
++  useEffect(() => {
++    if (!autoDismiss || !isVisible || !onDismiss) return;
++
++    const timer = setTimeout(() => {
+       onDismiss();
+     }, autoDismiss);
+-  }
++
++    return () => clearTimeout(timer);
++  }, [autoDismiss, isVisible, onDismiss]);
+   
+   return (
+     <AnimatePresence>
+diff --git a/src/contexts/AlertContext.tsx b/src/contexts/AlertContext.tsx
+index d946bac..4c2d8e1 100644
+--- a/src/contexts/AlertContext.tsx
++++ b/src/contexts/AlertContext.tsx
+@@ -2,7 +2,7 @@
+ 
+ 'use client';
+ 
+-import { createContext, useContext, useState, ReactNode } from 'react';
++import { createContext, useContext, useState, useRef, ReactNode } from 'react';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { CheckCircle, AlertCircle, XCircle, Info, X } from 'lucide-react';
+ 
+@@ -34,8 +34,10 @@ export function AlertProvider({ children }: { children: ReactNode }) {
+   const [isOpen, setIsOpen] = useState(false);
+   const [toastState, setToastState] = useState<{ message: string; type: AlertType; id: number } | null>(null);
+   
+-  // For confirm promise
+-  let confirmResolver: ((value: boolean) => void) | null = null;
++  // Use a ref so the resolver survives the re-render triggered by setIsOpen/setAlertState.
++  // A plain `let` here would be reset to null on every render, so handleConfirm/handleCancel
++  // (which run in a *later* render than the one that called confirm()) would never see it.
++  const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
+   
+   const alert = (options: AlertOptions) => {
+     setAlertState(options);
+@@ -46,7 +48,7 @@ export function AlertProvider({ children }: { children: ReactNode }) {
+     setAlertState({ ...options, showCancel: true });
+     setIsOpen(true);
+     return new Promise((resolve) => {
+-      confirmResolver = resolve;
++      confirmResolverRef.current = resolve;
+     });
+   };
+   
+@@ -60,9 +62,9 @@ export function AlertProvider({ children }: { children: ReactNode }) {
+   
+   const closeAlert = () => {
+     setIsOpen(false);
+-    if (confirmResolver) {
+-      confirmResolver(false);
+-      confirmResolver = null;
++    if (confirmResolverRef.current) {
++      confirmResolverRef.current(false);
++      confirmResolverRef.current = null;
+     }
+     setAlertState(null);
+   };
+@@ -71,9 +73,9 @@ export function AlertProvider({ children }: { children: ReactNode }) {
+     if (alertState?.onConfirm) {
+       alertState.onConfirm();
+     }
+-    if (confirmResolver) {
+-      confirmResolver(true);
+-      confirmResolver = null;
++    if (confirmResolverRef.current) {
++      confirmResolverRef.current(true);
++      confirmResolverRef.current = null;
+     }
+     setIsOpen(false);
+     setAlertState(null);
+@@ -83,9 +85,9 @@ export function AlertProvider({ children }: { children: ReactNode }) {
+     if (alertState?.onCancel) {
+       alertState.onCancel();
+     }
+-    if (confirmResolver) {
+-      confirmResolver(false);
+-      confirmResolver = null;
++    if (confirmResolverRef.current) {
++      confirmResolverRef.current(false);
++      confirmResolverRef.current = null;
+     }
+     setIsOpen(false);
+     setAlertState(null);
+diff --git a/src/contexts/AuthContext.tsx b/src/contexts/AuthContext.tsx
+index 755d842..8d4ac1f 100644
+--- a/src/contexts/AuthContext.tsx
++++ b/src/contexts/AuthContext.tsx
+@@ -3,6 +3,8 @@
+ import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+ import type { User } from '@/lib/db/schema';
+ import { getCurrentUser, logout as logoutUser } from '@/lib/auth/pinAuth';
++import { startReminderScheduler } from '@/lib/notifications/reminderScheduler';
++import { processNotificationQueue, cleanupOldNotifications } from '@/lib/notifications/notificationQueue';
+ 
+ interface AuthContextType {
+   user: User | null;
+@@ -47,6 +49,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
+     setUser(null);
+   };
+ 
++  // Deadline reminders: decide which tasks need a reminder right now and
++  // queue them (every 15 min), then separately flush the queue into actual
++  // browser notifications (every 1 min so queued reminders fire promptly).
++  // Both are safe to run even without notification permission granted yet -
++  // sendNotification() internally checks Notification.permission and is a
++  // no-op until the user opts in via the EnableNotifications prompt.
++  useEffect(() => {
++    if (!user) return;
++
++    const reminderInterval = startReminderScheduler(15);
++
++    processNotificationQueue().catch(console.error);
++    const queueInterval = setInterval(() => {
++      processNotificationQueue().catch(console.error);
++    }, 60 * 1000);
++
++    cleanupOldNotifications().catch(console.error);
++
++    return () => {
++      clearInterval(reminderInterval);
++      clearInterval(queueInterval);
++    };
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [user?.id]);
++
+   const value = {
+     user,
+     isLoading,
+diff --git a/src/hooks/useAssignments.ts b/src/hooks/useAssignments.ts
+deleted file mode 100644
+index 7bc2971..0000000
+--- a/src/hooks/useAssignments.ts
++++ /dev/null
+@@ -1,71 +0,0 @@
+-import { useEffect, useState, useCallback } from 'react';
+-import { getItems, updateItem, addItem, deleteItem } from '@/lib/db/indexedDB';
+-import { STORES } from '@/lib/db/schema';
+-import { getCurrentUserId } from '@/lib/auth/pinAuth';
+-import type { Task, Course } from '@/lib/db/schema';
+-
+-export function useAssignments() {
+-  const [assignments, setAssignments] = useState<Task[]>([]);
+-  const [loading, setLoading] = useState(true);
+-  const [error, setError] = useState<string | null>(null);
+-  
+-  const userId = getCurrentUserId();
+-  
+-  const loadAssignments = useCallback(async () => {
+-    if (!userId) {
+-      setAssignments([]);
+-      setLoading(false);
+-      return;
+-    }
+-    
+-    try {
+-      setLoading(true);
+-      setError(null);
+-      
+-      // Get all tasks (not filtered by user)
+-      // We need to modify this to get ALL tasks, then filter by course enrollment
+-      const allTasks = await getItems<Task>(STORES.tasks);
+-      
+-      // Get user's courses
+-      const userCourses = await getItems<Course>(STORES.courses, 'userId', userId);
+-      const userCourseIds = userCourses.map(c => c.id);
+-      
+-      // Filter: assignments where courseId matches user's enrolled courses
+-      // AND assignment is not created by the student (different userId)
+-      const filteredAssignments = allTasks.filter(task => 
+-        task.courseId && 
+-        task.courseId !== 'general' &&
+-        userCourseIds.includes(task.courseId) &&
+-        task.userId !== userId // Assignment created by lecturer, not student
+-      );
+-      
+-      setAssignments(filteredAssignments);
+-    } catch (err) {
+-      setError(err instanceof Error ? err.message : 'Failed to load assignments');
+-    } finally {
+-      setLoading(false);
+-    }
+-  }, [userId]);
+-  
+-  // Mark assignment as complete (for students)
+-  const markComplete = useCallback(async (assignmentId: string) => {
+-    await updateItem(STORES.tasks, assignmentId, {
+-      isDone: true,
+-      completedAt: new Date().toISOString(),
+-      status: 'completed'
+-    });
+-    await loadAssignments();
+-  }, [loadAssignments]);
+-  
+-  useEffect(() => {
+-    loadAssignments();
+-  }, [loadAssignments]);
+-  
+-  return {
+-    assignments,
+-    loading,
+-    error,
+-    markComplete,
+-    refreshAssignments: loadAssignments
+-  };
+-}
+\ No newline at end of file
+diff --git a/src/hooks/useCourseCatalog.ts b/src/hooks/useCourseCatalog.ts
+deleted file mode 100644
+index 7f53d99..0000000
+--- a/src/hooks/useCourseCatalog.ts
++++ /dev/null
+@@ -1,135 +0,0 @@
+-// import { useEffect, useState, useCallback } from 'react';
+-// import { getItems, addItem, updateItem, deleteItem } from '@/lib/db/indexedDB';
+-// import { STORES } from '@/lib/db/schema';
+-// import { getCurrentUserId, getCurrentUserRole } from '@/lib/auth/pinAuth';
+-// import type { Course } from '@/lib/db/schema';
+-
+-// export function useCourseCatalog() {
+-//   const [allCourses, setAllCourses] = useState<Course[]>([]);
+-//   const [loading, setLoading] = useState(true);
+-  
+-//   const userId = getCurrentUserId();
+-//   const userRole = getCurrentUserRole();
+-  
+-//   // Load all courses
+-//   const loadAllCourses = useCallback(async () => {
+-//     const courses = await getItems<Course>(STORES.courses);
+-//     setAllCourses(courses);
+-//     return courses;
+-//   }, []);
+-  
+-//   // Get courses the student can enroll in (master courses not enrolled yet)
+-//   const getAvailableCourses = useCallback(() => {
+-//     if (!userId || userRole !== 'student') return [];
+-    
+-//     // For now, return all master courses (isMaster === true)
+-//     // Enrollment check will be added later
+-//     return allCourses.filter(course => course.isMaster === true);
+-//   }, [allCourses, userId, userRole]);
+-  
+-//   // Get student's personally created courses
+-//   const getMyCreatedCourses = useCallback(() => {
+-//     if (!userId) return [];
+-//     return allCourses.filter(course => 
+-//       course.userId === userId && course.isMaster === false
+-//     );
+-//   }, [allCourses, userId]);
+-  
+-//   // Get enrolled master courses (to be implemented with enrollments)
+-//   const getMyEnrolledCourses = useCallback(() => {
+-//     return allCourses.filter(course => course.isMaster === true);
+-//   }, [allCourses]);
+-  
+-//   // Get ALL student's courses (created + enrolled)
+-//   const getMyAllCourses = useCallback(() => {
+-//     const created = getMyCreatedCourses();
+-//     const enrolled = getMyEnrolledCourses();
+-//     return [...created, ...enrolled];
+-//   }, [getMyCreatedCourses, getMyEnrolledCourses]);
+-  
+-//   // Student creates a course
+-//   const createStudentCourse = useCallback(async (courseData: Omit<Course, 'id' | 'userId' | 'isMaster'>) => {
+-//     if (!userId) throw new Error('Not logged in');
+-    
+-//     const newCourse: Course = {
+-//       ...courseData,
+-//       id: crypto.randomUUID(),
+-//       userId: userId,
+-//       isMaster: false,
+-//     };
+-    
+-//     await addItem(STORES.courses, newCourse);
+-//     await loadAllCourses();
+-//     return newCourse;
+-//   }, [userId, loadAllCourses]);
+-  
+-//   // Student updates their own course
+-//   const updateStudentCourse = useCallback(async (courseId: string, updates: Partial<Course>) => {
+-//     const course = allCourses.find(c => c.id === courseId);
+-//     if (!course || course.userId !== userId) {
+-//       throw new Error('Can only update your own courses');
+-//     }
+-//     await updateItem(STORES.courses, courseId, updates);
+-//     await loadAllCourses();
+-//   }, [userId, allCourses, loadAllCourses]);
+-  
+-//   // Delete student's own course
+-//   const deleteStudentCourse = useCallback(async (courseId: string) => {
+-//     const course = allCourses.find(c => c.id === courseId);
+-//     if (!course || course.userId !== userId) {
+-//       throw new Error('Can only delete your own courses');
+-//     }
+-//     await deleteItem(STORES.courses, courseId);
+-//     await loadAllCourses();
+-//   }, [userId, allCourses, loadAllCourses]);
+-  
+-//   // Lecturer creates master course
+-//   const createMasterCourse = useCallback(async (courseData: Omit<Course, 'id' | 'userId' | 'isMaster'>) => {
+-//     if (!userId || userRole !== 'lecturer') throw new Error('Only lecturers can create master courses');
+-    
+-//     const newCourse: Course = {
+-//       ...courseData,
+-//       id: crypto.randomUUID(),
+-//       userId: userId,
+-//       isMaster: true,
+-//     };
+-    
+-//     await addItem(STORES.courses, newCourse);
+-//     await loadAllCourses();
+-//     return newCourse;
+-//   }, [userId, userRole, loadAllCourses]);
+-  
+-//   // Delete master course (lecturer only)
+-//   const deleteMasterCourse = useCallback(async (courseId: string) => {
+-//     const course = allCourses.find(c => c.id === courseId);
+-//     if (!course || course.userId !== userId) {
+-//       throw new Error('Can only delete your own courses');
+-//     }
+-//     await deleteItem(STORES.courses, courseId);
+-//     await loadAllCourses();
+-//   }, [userId, allCourses, loadAllCourses]);
+-  
+-//   useEffect(() => {
+-//     const load = async () => {
+-//       setLoading(true);
+-//       await loadAllCourses();
+-//       setLoading(false);
+-//     };
+-//     load();
+-//   }, [loadAllCourses]);
+-  
+-//   return {
+-//     allCourses,
+-//     availableCourses: getAvailableCourses(),
+-//     myCreatedCourses: getMyCreatedCourses(),
+-//     myEnrolledCourses: getMyEnrolledCourses(),
+-//     myAllCourses: getMyAllCourses(),
+-//     loading,
+-//     createStudentCourse,
+-//     updateStudentCourse,
+-//     deleteStudentCourse,
+-//     createMasterCourse,
+-//     deleteMasterCourse,
+-//     refreshCatalog: loadAllCourses
+-//   };
+-// }
+\ No newline at end of file
+diff --git a/src/hooks/useCourses.ts b/src/hooks/useCourses.ts
+deleted file mode 100644
+index 6910707..0000000
+--- a/src/hooks/useCourses.ts
++++ /dev/null
+@@ -1,61 +0,0 @@
+-import { useEffect, useState, useCallback } from 'react';
+-import { getItems, addItem, updateItem, deleteItem } from '@/lib/db/indexedDB';
+-import { STORES } from '@/lib/db/schema';
+-import { getCurrentUserId } from '@/lib/auth/pinAuth';
+-import type { CourseCatalog } from '@/lib/db/schema';
+-
+-export function useCourses() {
+-  const [courses, setCourses] = useState<CourseCatalog[]>([]);
+-  const [loading, setLoading] = useState(true);
+-  
+-  const userId = getCurrentUserId();
+-  
+-  const loadCourses = useCallback(async () => {
+-    if (!userId) {
+-      setLoading(false);
+-      return;
+-    }
+-    // Use courseCatalog instead of courses
+-    const allCourses = await getItems<CourseCatalog>(STORES.courseCatalog);
+-    // Filter to show only courses the user created OR is enrolled in
+-    // For now, show all courses
+-    setCourses(allCourses);
+-    setLoading(false);
+-  }, [userId]);
+-  
+-  const addCourse = useCallback(async (course: Omit<CourseCatalog, 'id'>) => {
+-    if (!userId) throw new Error('No user logged in');
+-    const newCourse = { 
+-      ...course, 
+-      id: crypto.randomUUID(),
+-      createdBy: userId,
+-      createdAt: new Date().toISOString(),
+-      isVerified: false
+-    };
+-    await addItem(STORES.courseCatalog, newCourse);
+-    await loadCourses();
+-  }, [userId, loadCourses]);
+-  
+-  const updateCourse = useCallback(async (id: string, updates: Partial<CourseCatalog>) => {
+-    await updateItem(STORES.courseCatalog, id, updates);
+-    await loadCourses();
+-  }, [loadCourses]);
+-  
+-  const deleteCourse = useCallback(async (id: string) => {
+-    await deleteItem(STORES.courseCatalog, id);
+-    await loadCourses();
+-  }, [loadCourses]);
+-  
+-  useEffect(() => {
+-    loadCourses();
+-  }, [loadCourses]);
+-  
+-  return {
+-    courses,
+-    loading,
+-    addCourse,
+-    updateCourse,
+-    deleteCourse,
+-    refreshCourses: loadCourses
+-  };
+-}
+\ No newline at end of file
+diff --git a/src/hooks/useEnrollments.ts b/src/hooks/useEnrollments.ts
+index c8cad4c..ea4bf5a 100644
+--- a/src/hooks/useEnrollments.ts
++++ b/src/hooks/useEnrollments.ts
+@@ -1,8 +1,8 @@
+ import { useEffect, useState, useCallback } from 'react';
+-import { getItems, addItem, deleteItem, getItem, updateItem } from '@/lib/db/indexedDB';
++import { getItems, addItem, updateItem } from '@/lib/db/indexedDB';
+ import { STORES } from '@/lib/db/schema';
+ import { getCurrentUserId } from '@/lib/auth/pinAuth';
+-import type { Course, Enrollment } from '@/lib/db/schema';
++import type { Enrollment } from '@/lib/db/schema';
+ 
+ export function useEnrollments() {
+   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+@@ -16,7 +16,7 @@ export function useEnrollments() {
+       setLoading(false);
+       return;
+     }
+-    
++
+     try {
+       // Try to get enrollments - if store doesn't exist yet, return empty array
+       const allEnrollments = await getItems<Enrollment>(STORES.enrollments);
+@@ -30,23 +30,23 @@ export function useEnrollments() {
+     }
+   }, [userId]);
+ 
+-  // Enroll in a course
+-  const enrollInCourse = useCallback(async (courseId: string) => {
++  // Enroll in a course (by catalog id)
++  const enrollInCourse = useCallback(async (catalogId: string) => {
+     if (!userId) throw new Error('Not logged in');
+-    
++
+     try {
+       // Check if already enrolled
+-      const existing = enrollments.find(e => e.courseId === courseId);
++      const existing = enrollments.find(e => e.catalogId === catalogId);
+       if (existing) return;
+-      
++
+       const enrollment: Enrollment = {
+         id: crypto.randomUUID(),
+         studentId: userId,
+-        courseId,
++        catalogId,
+         enrolledAt: new Date().toISOString(),
+         status: 'active'
+       };
+-      
++
+       await addItem(STORES.enrollments, enrollment);
+       await loadEnrollments();
+     } catch (error) {
+@@ -54,13 +54,13 @@ export function useEnrollments() {
+       throw error;
+     }
+   }, [userId, enrollments, loadEnrollments]);
+-  
+-  // Drop a course
+-  const dropCourse = useCallback(async (courseId: string) => {
++
++  // Drop a course (by catalog id)
++  const dropCourse = useCallback(async (catalogId: string) => {
+     try {
+-      const enrollment = enrollments.find(e => e.courseId === courseId);
++      const enrollment = enrollments.find(e => e.catalogId === catalogId);
+       if (!enrollment) return;
+-      
++
+       await updateItem(STORES.enrollments, enrollment.id, { status: 'dropped' });
+       await loadEnrollments();
+     } catch (error) {
+@@ -68,28 +68,28 @@ export function useEnrollments() {
+       throw error;
+     }
+   }, [enrollments, loadEnrollments]);
+-  
++
+   // Check if enrolled in a course
+-  const isEnrolled = useCallback((courseId: string) => {
+-    return enrollments.some(e => e.courseId === courseId);
++  const isEnrolled = useCallback((catalogId: string) => {
++    return enrollments.some(e => e.catalogId === catalogId);
+   }, [enrollments]);
+-  
+-  // Get student's enrolled course IDs
+-  const getEnrolledCourseIds = useCallback(() => {
+-    return enrollments.map(e => e.courseId);
++
++  // Get student's enrolled catalog IDs
++  const getEnrolledCatalogIds = useCallback(() => {
++    return enrollments.map(e => e.catalogId);
+   }, [enrollments]);
+-  
++
+   useEffect(() => {
+     loadEnrollments();
+   }, [loadEnrollments]);
+-  
++
+   return {
+     enrollments,
+     loading,
+     enrollInCourse,
+     dropCourse,
+     isEnrolled,
+-    getEnrolledCourseIds,
++    getEnrolledCatalogIds,
+     refreshEnrollments: loadEnrollments
+   };
+-}
+\ No newline at end of file
++}
+diff --git a/src/types/index.ts b/src/types/index.ts
+index cad68e2..6c329f3 100644
+--- a/src/types/index.ts
++++ b/src/types/index.ts
+@@ -3,7 +3,9 @@
+ 
+ export type {
+   User,
+-  Course,
++  CourseCatalog,
++  LecturerCourse,
++  Enrollment,
+   Task,
+   Routine
+ } from '@/lib/db/schema';
+\ No newline at end of file
