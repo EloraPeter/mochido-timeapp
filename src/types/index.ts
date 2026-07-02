@@ -14,5 +14,7 @@ export type {
   LecturerCourse,
   Task,
   Routine,
-  Enrollment
+  Enrollment,
+  CourseMaterial,
+  MaterialType,
 } from '@/lib/db/schema';

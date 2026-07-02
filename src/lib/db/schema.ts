@@ -1,16 +1,17 @@
 // Database configuration
 export const DB_NAME = 'mochido_db';
-export const DB_VERSION = 4; // Increment to 3
+export const DB_VERSION = 5; // v5: adds materials store
 
 export const STORES = {
   users: 'users',
-  courseCatalog: 'courseCatalog',     // NEW: Master course definitions
-  lecturerCourses: 'lecturerCourses', // NEW: Lecturer-specific offerings
+  courseCatalog: 'courseCatalog',
+  lecturerCourses: 'lecturerCourses',
   enrollments: 'enrollments',
   tasks: 'tasks',
   routines: 'routines',
   streaks: 'streaks',
-  notificationQueue: 'notificationQueue'
+  notificationQueue: 'notificationQueue',
+  materials: 'materials',             // v5: course materials & announcements
 };
 
 // ========== DATA MODELS ==========
@@ -108,3 +109,37 @@ export interface StreakData {
   lastUpdatedAt: string;
 }
 
+
+// ========== COURSE MATERIALS (v5) ==========
+
+export type MaterialType =
+  | 'announcement'
+  | 'syllabus'
+  | 'pdf'
+  | 'slides'
+  | 'link'
+  | 'document';
+
+export interface CourseMaterial {
+  id: string;
+  catalogId: string;           // which course this belongs to
+  lecturerCourseId?: string;   // which offering (optional - materials can be catalog-level)
+  type: MaterialType;
+  title: string;
+  description?: string;
+  // For 'link' type: external URL entered by lecturer
+  url?: string;
+  // For file types (pdf, slides, document, syllabus):
+  // path within the Supabase Storage 'course-materials' bucket
+  storagePath?: string;
+  fileName?: string;           // original file name shown to students
+  fileSize?: number;           // bytes, shown to students
+  mimeType?: string;
+  // Organisation
+  isPinned: boolean;           // pinned items (usually announcements) shown first
+  module?: string;             // optional grouping label e.g. "Week 3", "Module 2"
+  // Metadata
+  createdBy: string;           // lecturerId
+  createdAt: string;
+  updatedAt: string;
+}

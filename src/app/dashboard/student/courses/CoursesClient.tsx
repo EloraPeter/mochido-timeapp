@@ -47,6 +47,7 @@ export default function CoursesClient() {
   const { myCourses, availableCourses, loading, dropCourse, createStudentCourse, enrollInCourse } = useCourseService();
   const { success, error, confirm } = useCustomAlert();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('my-courses');
   // Sync tab with URL
   useEffect(() => {
@@ -306,13 +307,23 @@ export default function CoursesClient() {
                                     )}
                                   </div>
                                 </div>
-                                <button
-                                  onClick={() => handleDrop(course.id, course.title)}
-                                  className="p-2 text-red-500 active:bg-red-50 dark:active:bg-red-900/20 rounded-full transition-colors"
-                                  aria-label="Drop course"
-                                >
-                                  <LogOut size={16} />
-                                </button>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => router.push(`/dashboard/student/courses/${course.id}/materials`)}
+                                    className="p-2 text-blue-500 active:bg-blue-50 dark:active:bg-blue-900/20 rounded-full transition-colors"
+                                    aria-label="Course materials"
+                                    title="Course materials"
+                                  >
+                                    <BookOpen size={16} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDrop(course.id, course.title)}
+                                    className="p-2 text-red-500 active:bg-red-50 dark:active:bg-red-900/20 rounded-full transition-colors"
+                                    aria-label="Drop course"
+                                  >
+                                    <LogOut size={16} />
+                                  </button>
+                                </div>
                               </div>
                             ))}
                           </div>
