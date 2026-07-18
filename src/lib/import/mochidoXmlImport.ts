@@ -1,44 +1,29 @@
-// Parser for the official Mochido course import format. Accepts either a
-// full <mochido><courses><course>...</course></courses></mochido> document
-// or just the inner <course> block(s) pasted on their own. Designed to be
-// forgiving: only <code>, <title>, <units>, <level>, <semester> are
-// required - everything else (description, department, faculty, lecturer,
-// materials) is optional and silently omitted if missing, so a lecturer can
-// paste a five-tag course and have it work.
+// Parser for the official Mochido XML course import format. Accepts either
+// a full <mochido><courses><course>...</course></courses></mochido>
+// document or just the inner <course> block(s) pasted on their own.
+//
+// Required per course: <code>, <title>, <units>, <level>, <semester>, and
+// at least one valid <schedule> (day + startTime + endTime + location).
+// Mochido is a class-reminder app, so a course with no schedule can't
+// generate reminders - it's rejected during preview rather than imported
+// with an empty timetable.
+//
+// A course can repeat <schedule> for multiple class sessions per week
+// (e.g. a lecture on Monday and a lab on Thursday in a different room).
 
-export interface ParsedMaterial {
-  title: string;
-  type: string; // raw string from the XML, e.g. "PDF", "VIDEO" - mapped later
-  url: string;
-}
-
-export interface ParsedCourse {
-  code: string;
-  title: string;
-  units: number;
-  level: string;
-  semester: string;
-  description?: string;
-  department?: string;
-  faculty?: string;
-  lecturerName?: string;
-  lecturerEmail?: string;
-  materials: ParsedMaterial[];
-}
-
-export interface ImportIssue {
-  index: number;       // 1-based position among <course> nodes found
-  code?: string;        // course code, if it was readable
-  message: string;
-}
-
-export interface ParseResult {
-  courses: ParsedCourse[];
-  issues: ImportIssue[];
-}
+import {
+  type ParsedCourse,
+  type ParsedMaterial,
+  type ParsedSchedule,
+  type ImportIssue,
+  type ParseResult,
+  normalizeDay,
+  normalizeTime,
+  splitDays,
+} from './importShared';
 
 function text(el: Element, tag: string): string {
-  // Direct child lookup first (avoids grabbing a same-named tag nested
+  // Direct child lookup only (avoids grabbing a same-named tag nested
   // deeper, e.g. a <title> inside <materials><material>).
   for (const child of Array.from(el.children)) {
     if (child.tagName.toLowerCase() === tag) {
@@ -46,6 +31,10 @@ function text(el: Element, tag: string): string {
     }
   }
   return '';
+}
+
+function directChild(el: Element, tag: string): Element | undefined {
+  return Array.from(el.children).find(c => c.tagName.toLowerCase() === tag);
 }
 
 export function parseMochidoXml(xmlString: string): ParseResult {
@@ -112,11 +101,66 @@ export function parseMochidoXml(xmlString: string): ParseResult {
       return;
     }
 
+    // ---- Schedule (required) ----
+    const schedules: ParsedSchedule[] = [];
+    const scheduleNodes = Array.from(node.querySelectorAll('schedules > schedule'));
+
+    scheduleNodes.forEach((sNode, sIdx) => {
+      const dayRaw = text(sNode, 'day');
+      const startRaw = text(sNode, 'startTime') || text(sNode, 'starttime');
+      const endRaw = text(sNode, 'endTime') || text(sNode, 'endtime');
+      const location = text(sNode, 'location');
+
+      const sMissing: string[] = [];
+      if (!dayRaw) sMissing.push('day');
+      if (!startRaw) sMissing.push('startTime');
+      if (!endRaw) sMissing.push('endTime');
+      if (!location) sMissing.push('location');
+      if (sMissing.length > 0) {
+        issues.push({
+          index,
+          code,
+          message: `Course ${code}, schedule #${sIdx + 1}: missing ${sMissing.join(', ')}. That session was skipped.`
+        });
+        return;
+      }
+
+      const startTime = normalizeTime(startRaw);
+      const endTime = normalizeTime(endRaw);
+      if (!startTime || !endTime) {
+        issues.push({
+          index,
+          code,
+          message: `Course ${code}, schedule #${sIdx + 1}: couldn't understand the time ("${startRaw}" - "${endRaw}"). That session was skipped.`
+        });
+        return;
+      }
+
+      const dayTokens = splitDays(dayRaw);
+      for (const token of dayTokens) {
+        const day = normalizeDay(token);
+        if (!day) {
+          issues.push({ index, code, message: `Course ${code}, schedule #${sIdx + 1}: unrecognized day "${token}" - skipped.` });
+          continue;
+        }
+        schedules.push({ day, startTime, endTime, location });
+      }
+    });
+
+    if (schedules.length === 0) {
+      issues.push({
+        index,
+        code,
+        message: `Course #${index} (${code}) has no valid <schedule> (day, startTime, endTime, location) - rejected. Mochido needs a schedule to create reminders.`
+      });
+      return;
+    }
+
     const description = text(node, 'description') || undefined;
     const department = text(node, 'department') || undefined;
     const faculty = text(node, 'faculty') || undefined;
 
-    const lecturerNode = Array.from(node.children).find(c => c.tagName.toLowerCase() === 'lecturer');
+    const lecturerNode = directChild(node, 'lecturer');
     const lecturerName = lecturerNode ? text(lecturerNode, 'name') || undefined : undefined;
     const lecturerEmail = lecturerNode ? text(lecturerNode, 'email') || undefined : undefined;
 
@@ -128,14 +172,15 @@ export function parseMochidoXml(xmlString: string): ParseResult {
       }))
       .filter(m => m.url); // a material without a url isn't usable - drop it quietly
 
-    courses.push({ code, title, units, level, semester, description, department, faculty, lecturerName, lecturerEmail, materials });
+    courses.push({ code, title, units, level, semester, description, department, faculty, lecturerName, lecturerEmail, schedules, materials });
   });
 
   return { courses, issues };
 }
 
 // Short-form template - the version meant for quick copy/paste/fill-in.
-// Matches the "official Mochido course import template" minimum fields.
+// One <schedule> per class session; add more <schedule> blocks for
+// courses that meet more than once a week (different day/time/location).
 export const MOCHIDO_XML_TEMPLATE = `<?xml version="1.0" encoding="UTF-8"?>
 <mochido>
     <courses>
@@ -146,6 +191,20 @@ export const MOCHIDO_XML_TEMPLATE = `<?xml version="1.0" encoding="UTF-8"?>
             <units>3</units>
             <level>400</level>
             <semester>First</semester>
+            <schedules>
+                <schedule>
+                    <day>Monday</day>
+                    <startTime>09:00</startTime>
+                    <endTime>11:00</endTime>
+                    <location>LT1</location>
+                </schedule>
+                <schedule>
+                    <day>Thursday</day>
+                    <startTime>14:00</startTime>
+                    <endTime>16:00</endTime>
+                    <location>Lab 2</location>
+                </schedule>
+            </schedules>
         </course>
 
         <course>
@@ -154,6 +213,14 @@ export const MOCHIDO_XML_TEMPLATE = `<?xml version="1.0" encoding="UTF-8"?>
             <units>3</units>
             <level>400</level>
             <semester>First</semester>
+            <schedules>
+                <schedule>
+                    <day>Monday, Wednesday, Friday</day>
+                    <startTime>09:00</startTime>
+                    <endTime>10:00</endTime>
+                    <location>LT2</location>
+                </schedule>
+            </schedules>
         </course>
 
     </courses>
