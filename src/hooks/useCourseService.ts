@@ -2,7 +2,23 @@ import { useEffect, useState, useCallback } from 'react';
 import { getItems, addItem, updateItem, getItem } from '@/lib/db/indexedDB';
 import { STORES } from '@/lib/db/schema';
 import { getCurrentUserId, getCurrentUserRole } from '@/lib/auth/pinAuth';
-import type { CourseCatalog, LecturerCourse, Enrollment } from '@/lib/db/schema';
+import type { CourseCatalog, LecturerCourse, Enrollment, CourseMaterial, MaterialType } from '@/lib/db/schema';
+import type { ParsedCourse } from '@/lib/import/mochidoXmlImport';
+
+export interface ImportSummary {
+  imported: string[];
+  skipped: { code: string; reason: string }[];
+}
+
+function mapImportedMaterialType(raw: string): MaterialType {
+  const t = raw.trim().toLowerCase();
+  if (t === 'pdf') return 'pdf';
+  if (t === 'video') return 'video';
+  if (t === 'slides' || t === 'slide' || t === 'ppt' || t === 'pptx') return 'slides';
+  if (t === 'document' || t === 'doc' || t === 'docx') return 'document';
+  if (t === 'syllabus') return 'syllabus';
+  return 'link';
+}
 
 // Extended course type with schedule info
 export interface CourseWithSchedule extends CourseCatalog {
@@ -125,6 +141,85 @@ export function useCourseService() {
     
     return catalog;
   }, [userId, findOrCreateCatalog, loadLecturerCourses, enrollInCourse]);
+
+  // Bulk-import courses parsed from an XML file or pasted XML text.
+  // Each course becomes a new, already-verified CourseCatalog entry
+  // (import = the lecturer vouching for it) plus a LecturerCourse offering
+  // with no schedule set yet, plus any materials listed for it. Courses
+  // whose code already exists in the catalog are skipped rather than
+  // overwritten, since a code collision usually means the course already
+  // has real schedule/verification data attached.
+  const importCourses = useCallback(async (parsed: ParsedCourse[]): Promise<ImportSummary> => {
+    if (!userId) throw new Error('Not logged in');
+
+    const summary: ImportSummary = { imported: [], skipped: [] };
+    const existingCodes = new Set(allCatalogs.map(c => c.courseCode));
+
+    for (const course of parsed) {
+      if (existingCodes.has(course.code)) {
+        summary.skipped.push({
+          code: course.code,
+          reason: 'A course with this code already exists - skipped to avoid overwriting it.'
+        });
+        continue;
+      }
+
+      const now = new Date().toISOString();
+
+      const catalog: CourseCatalog = {
+        id: crypto.randomUUID(),
+        courseCode: course.code,
+        title: course.title,
+        description: course.description,
+        createdBy: userId,
+        isVerified: true,
+        lecturerId: userId,
+        department: course.department,
+        faculty: course.faculty,
+        level: course.level,
+        semester: course.semester,
+        units: course.units,
+        createdAt: now
+      };
+      await addItem(STORES.courseCatalog, catalog);
+
+      const lecturerCourseData: LecturerCourse = {
+        id: crypto.randomUUID(),
+        catalogId: catalog.id,
+        lecturerId: userId,
+        days: [],
+        startTime: '',
+        endTime: '',
+        currentSemester: course.semester,
+        createdAt: now
+      };
+      await addItem(STORES.lecturerCourses, lecturerCourseData);
+
+      for (const material of course.materials) {
+        const materialRecord: CourseMaterial = {
+          id: crypto.randomUUID(),
+          catalogId: catalog.id,
+          lecturerCourseId: lecturerCourseData.id,
+          type: mapImportedMaterialType(material.type),
+          title: material.title,
+          url: material.url,
+          isPinned: false,
+          createdBy: userId,
+          createdAt: now,
+          updatedAt: now
+        };
+        await addItem(STORES.materials, materialRecord);
+      }
+
+      existingCodes.add(course.code); // guard duplicates within the same batch
+      summary.imported.push(course.code);
+    }
+
+    await loadCatalogs();
+    await loadLecturerCourses();
+
+    return summary;
+  }, [userId, allCatalogs, loadCatalogs, loadLecturerCourses]);
 
   // Drop a course
   const dropCourse = useCallback(async (catalogId: string) => {
@@ -275,6 +370,7 @@ export function useCourseService() {
     claimCourse,
     findOrCreateCatalog,
     getCourseWithSchedule,
+    importCourses,
     
     // Refresh
     refresh: () => {

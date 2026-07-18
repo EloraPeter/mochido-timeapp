@@ -35,6 +35,13 @@ export interface CourseCatalog {
   isVerified: boolean;       // true when lecturer claims it
   lecturerId?: string;       // ID of lecturer who claimed it
   schoolId?: string;
+  // Added for XML/paste course import (see /lib/import/mochidoXmlImport.ts).
+  // All optional so manually-created catalog entries are unaffected.
+  department?: string;
+  faculty?: string;
+  level?: string;            // e.g. "400"
+  semester?: string;         // e.g. "First"
+  units?: number;
   createdAt: string;
 }
 
@@ -117,6 +124,7 @@ export type MaterialType =
   | 'syllabus'
   | 'pdf'
   | 'slides'
+  | 'video'
   | 'link'
   | 'document';
 
