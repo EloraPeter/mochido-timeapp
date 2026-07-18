@@ -10,6 +10,7 @@ import MobileSidebar from '@/components/MobileSidebar';
 import { useCustomAlert } from '@/hooks/useCustomAlert';
 import { SkeletonCard } from '@/components/ui/SkeletonCard';
 import { SkeletonList } from '@/components/ui/SkeletonList';
+import CourseImportModal from '@/components/CourseImportModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus,
@@ -25,7 +26,8 @@ import {
   Eye,
   GripVertical,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  FileUp
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -53,10 +55,11 @@ const DAY_ABBREVS: Record<string, string> = {
 
 export default function LecturerCoursesClient() {
   const { user } = useAuth();
-  const { courses, loading, addCourse, updateCourse, deleteCourse } = useLecturerCourses();
+  const { courses, loading, addCourse, updateCourse, deleteCourse, refreshCourses } = useLecturerCourses();
   const { allCatalogs, lecturerCourses, claimCourse, refresh: refreshCatalogs, loading: catalogLoading } = useCourseService();
   const router = useRouter();
   const [showModal, setShowModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [editingCourse, setEditingCourse] = useState<any>(null);
   const { success, error, confirm, toast } = useCustomAlert();
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -259,13 +262,22 @@ export default function LecturerCoursesClient() {
             </h1>
             <p className="text-xs text-gray-500 mt-0.5">Manage your course offerings</p>
           </div>
-          <button
-            onClick={() => handleOpenModal()}
-            className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-500 text-white shadow-md active:scale-95 transition-transform"
-            aria-label="New Course"
-          >
-            <Plus size={22} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 shadow-sm active:scale-95 transition-transform"
+              aria-label="Import Courses"
+            >
+              <FileUp size={20} />
+            </button>
+            <button
+              onClick={() => handleOpenModal()}
+              className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-500 text-white shadow-md active:scale-95 transition-transform"
+              aria-label="New Course"
+            >
+              <Plus size={22} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -702,6 +714,15 @@ export default function LecturerCoursesClient() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <CourseImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImported={() => {
+          refreshCourses();
+          refreshCatalogs();
+        }}
+      />
     </div>
   );
 }

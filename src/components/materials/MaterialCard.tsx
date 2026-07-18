@@ -9,6 +9,7 @@ import {
   BookOpen,
   Megaphone,
   File,
+  Video,
   Download,
   ExternalLink,
   Pin,
@@ -35,6 +36,7 @@ const TYPE_META: Record<MaterialType, { icon: React.ElementType; label: string; 
   syllabus:     { icon: BookOpen,  label: 'Syllabus',     color: 'text-teal-500'  },
   pdf:          { icon: FileText,  label: 'PDF',          color: 'text-red-500'   },
   slides:       { icon: Presentation, label: 'Slides',   color: 'text-blue-500'  },
+  video:        { icon: Video,     label: 'Video',        color: 'text-pink-500'  },
   link:         { icon: LinkIcon,  label: 'Link',         color: 'text-purple-500'},
   document:     { icon: File,      label: 'Document',     color: 'text-gray-500'  },
 };
