@@ -3,7 +3,8 @@ import { getItems, addItem, updateItem, getItem } from '@/lib/db/indexedDB';
 import { STORES } from '@/lib/db/schema';
 import { getCurrentUserId, getCurrentUserRole } from '@/lib/auth/pinAuth';
 import type { CourseCatalog, LecturerCourse, Enrollment, CourseMaterial, MaterialType } from '@/lib/db/schema';
-import type { ParsedCourse } from '@/lib/import/mochidoXmlImport';
+import type { ParsedCourse } from '@/lib/import/importShared';
+import { groupSchedules } from '@/lib/import/importShared';
 
 export interface ImportSummary {
   imported: string[];
@@ -164,6 +165,17 @@ export function useCourseService() {
         continue;
       }
 
+      // Defensive: the parsers should already reject schedule-less courses
+      // during preview, but Mochido is a reminder app - never create a
+      // course with no timetable data.
+      if (!course.schedules || course.schedules.length === 0) {
+        summary.skipped.push({
+          code: course.code,
+          reason: 'No schedule data - skipped so it wouldn\'t create a reminder-less course.'
+        });
+        continue;
+      }
+
       const now = new Date().toISOString();
 
       const catalog: CourseCatalog = {
@@ -183,23 +195,35 @@ export function useCourseService() {
       };
       await addItem(STORES.courseCatalog, catalog);
 
-      const lecturerCourseData: LecturerCourse = {
-        id: crypto.randomUUID(),
-        catalogId: catalog.id,
-        lecturerId: userId,
-        days: [],
-        startTime: '',
-        endTime: '',
-        currentSemester: course.semester,
-        createdAt: now
-      };
-      await addItem(STORES.lecturerCourses, lecturerCourseData);
+      // Each merged (days, startTime, endTime, location) group becomes its
+      // own LecturerCourse row, sharing this catalogId - identical to what
+      // manually adding the same course twice (e.g. a lecture slot and a
+      // separate lab slot) would produce.
+      const scheduleGroups = groupSchedules(course.schedules);
+      const lecturerCourseIds: string[] = [];
 
+      for (const group of scheduleGroups) {
+        const lecturerCourseData: LecturerCourse = {
+          id: crypto.randomUUID(),
+          catalogId: catalog.id,
+          lecturerId: userId,
+          days: group.days,
+          startTime: group.startTime,
+          endTime: group.endTime,
+          location: group.location,
+          currentSemester: course.semester,
+          createdAt: now
+        };
+        await addItem(STORES.lecturerCourses, lecturerCourseData);
+        lecturerCourseIds.push(lecturerCourseData.id);
+      }
+
+      // Materials (XML-only) attach to the first session/offering.
       for (const material of course.materials) {
         const materialRecord: CourseMaterial = {
           id: crypto.randomUUID(),
           catalogId: catalog.id,
-          lecturerCourseId: lecturerCourseData.id,
+          lecturerCourseId: lecturerCourseIds[0],
           type: mapImportedMaterialType(material.type),
           title: material.title,
           url: material.url,
