@@ -95,6 +95,18 @@ export async function getDB() {
         notifStore.createIndex('scheduledFor', 'scheduledFor');
         console.log('✅ Created notificationQueue store');
       }
+
+      // ===== MATERIALS STORE (v5) =====
+      if (!db.objectStoreNames.contains(STORES.materials)) {
+        const materialsStore = db.createObjectStore(STORES.materials, { keyPath: 'id' });
+        materialsStore.createIndex('catalogId', 'catalogId');
+        materialsStore.createIndex('lecturerCourseId', 'lecturerCourseId');
+        materialsStore.createIndex('type', 'type');
+        materialsStore.createIndex('isPinned', 'isPinned');
+        materialsStore.createIndex('createdBy', 'createdBy');
+        materialsStore.createIndex('module', 'module');
+        console.log('✅ Created materials store (v5)');
+      }
     },
   });
 

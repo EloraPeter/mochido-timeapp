@@ -55,6 +55,7 @@ export default function LecturerCoursesClient() {
   const { user } = useAuth();
   const { courses, loading, addCourse, updateCourse, deleteCourse } = useLecturerCourses();
   const { allCatalogs, lecturerCourses, claimCourse, refresh: refreshCatalogs, loading: catalogLoading } = useCourseService();
+  const router = useRouter();
   const [showModal, setShowModal] = useState(false);
   const [editingCourse, setEditingCourse] = useState<any>(null);
   const { success, error, confirm, toast } = useCustomAlert();
@@ -666,22 +667,34 @@ export default function LecturerCoursesClient() {
                 )}
               </div>
 
-              <div className="p-5 pt-0 flex gap-3">
+              <div className="p-5 pt-0 space-y-2">
                 <button
                   onClick={() => {
                     setShowDetails(false);
-                    handleOpenModal(selectedCourse);
+                    router.push(`/dashboard/lecturer/courses/${selectedCourse.catalogId}/materials`);
                   }}
-                  className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-medium shadow-md active:bg-blue-600 transition-colors"
+                  className="w-full py-3 bg-teal-500 text-white rounded-xl font-medium shadow-md active:bg-teal-600 transition-colors flex items-center justify-center gap-2"
                 >
-                  Edit Course
+                  <BookOpen size={16} />
+                  Course Materials
                 </button>
-                <button
-                  onClick={() => setShowDetails(false)}
-                  className="flex-1 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium active:bg-gray-200 dark:active:bg-gray-600 transition-colors"
-                >
-                  Close
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowDetails(false);
+                      handleOpenModal(selectedCourse);
+                    }}
+                    className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-medium shadow-md active:bg-blue-600 transition-colors"
+                  >
+                    Edit Course
+                  </button>
+                  <button
+                    onClick={() => setShowDetails(false)}
+                    className="flex-1 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium active:bg-gray-200 dark:active:bg-gray-600 transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
 
               <div className="h-2" />
