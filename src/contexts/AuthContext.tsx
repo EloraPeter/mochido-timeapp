@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/db/schema';
 import { getCurrentUser, logout as logoutUser } from '@/lib/auth/pinAuth';
+import { getSupabaseSession } from '@/lib/supabase/auth';
 import { startReminderScheduler } from '@/lib/notifications/reminderScheduler';
 import { processNotificationQueue, cleanupOldNotifications } from '@/lib/notifications/notificationQueue';
 
@@ -24,6 +25,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async () => {
     try {
       const currentUser = await getCurrentUser();
+      if (!currentUser) {
+        setUser(null);
+        return;
+      }
+
+      // A local User row existing doesn't mean the underlying Supabase
+      // session is still valid (expired token, signed out elsewhere,
+      // etc.) - confirm it here rather than trusting the local pointer
+      // alone. This is additive: nothing about the exported interface
+      // changes, callers still just get back `User | null`.
+      const session = await getSupabaseSession();
+      if (!session) {
+        await logoutUser();
+        setUser(null);
+        return;
+      }
+
       setUser(currentUser);
     } catch (error) {
       console.error('Failed to refresh user:', error);

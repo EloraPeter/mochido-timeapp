@@ -19,10 +19,15 @@ export const STORES = {
 export interface User {
   id: string;
   name: string;
-  pin: string;
-  role: 'student' | 'lecturer';
+  pin: string;                // empty string on a device where no local PIN unlock has been set yet
+  role: 'student' | 'lecturer' | 'admin';
   createdAt: Date;
   title?: 'Mr.' | 'Ms.' | 'Mrs.' | 'Dr.' | 'Prof.';
+  // Added for Supabase-backed auth (Milestone 0). `id` now equals the
+  // Supabase auth.uid() for any account created/logged-in post-migration,
+  // so every existing local-only feature keeps working unchanged - they
+  // only ever read `id`, not how it was assigned.
+  institutionId?: string;
 }
 
 // Entity 1: Global Course Identity (what the course IS)
