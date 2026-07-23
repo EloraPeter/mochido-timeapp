@@ -55,6 +55,10 @@ export default function LoginClient() {
       login(user);
       goToDashboard(user.role);
     } catch (err) {
+      if (err instanceof Error && err.message === 'PROFILE_MISSING') {
+        router.push('/complete-profile');
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
     } finally {
       setIsLoading(false);

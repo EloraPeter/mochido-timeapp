@@ -1,10 +1,10 @@
 import { supabase } from './client';
 
-// Thin wrapper around Supabase Auth + the `profiles`/`institutions` tables
-// from supabase/migrations/0001_institution_foundation.sql. This is the
-// real identity system going forward - see src/lib/auth/pinAuth.ts for how
-// it's bridged into the existing local (IndexedDB) user model so every
-// current local-only feature keeps working unchanged.
+// Thin wrapper around Supabase Auth + the `profiles`/`institutions` tables.
+// This is the real identity system going forward - see
+// src/lib/auth/pinAuth.ts for how it's bridged into the existing local
+// (IndexedDB) user model so every current local-only feature keeps
+// working unchanged.
 
 export interface InstitutionMatch {
   id: string;
@@ -15,9 +15,15 @@ export interface RemoteProfile {
   id: string;
   institutionId: string;
   institutionName?: string;
-  role: 'student' | 'lecturer' | 'admin';
+  baseRole: 'student' | 'lecturer';
   name: string;
   title?: string;
+}
+
+/** A person's administrative authority - separate from identity (RemoteProfile). See Milestone 1 plan. */
+export interface AdminAuthority {
+  isPlatformAdmin: boolean;
+  institutionAdminOf: string[]; // institution_id[] this person holds institution_admin over
 }
 
 /**
@@ -66,32 +72,38 @@ export async function signOutSupabase(): Promise<void> {
   await supabase.auth.signOut();
 }
 
-/** Returns the current Supabase session, or null if signed out/expired. */
+/** Returns the current Supabase session, or null if signed out/expired. Local read - see pinAuth.ts for how this is used without gating offline PIN unlock on it. */
 export async function getSupabaseSession() {
   const { data } = await supabase.auth.getSession();
   return data.session;
 }
 
+/** Returns the current Supabase auth user (id/email), or null if signed out. */
+export async function getSupabaseUser() {
+  const { data } = await supabase.auth.getUser();
+  return data.user;
+}
+
 export async function createProfileRow(params: {
   userId: string;
   institutionId: string;
-  role: 'student' | 'lecturer';
+  baseRole: 'student' | 'lecturer';
   name: string;
 }): Promise<void> {
   const { error } = await supabase.from('profiles').insert({
     id: params.userId,
     institution_id: params.institutionId,
-    role: params.role,
+    base_role: params.baseRole,
     name: params.name,
   });
   if (error) throw new Error(error.message);
 }
 
-/** Fetches the signed-in user's own profile (RLS restricts this to exactly one row: their own). */
+/** Fetches the signed-in user's own profile (RLS restricts this to exactly one row: their own). Returns null if no profile exists yet (orphaned auth account - see /complete-profile). */
 export async function fetchMyProfile(): Promise<RemoteProfile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, institution_id, role, name, title, institutions ( name )')
+    .select('id, institution_id, base_role, name, title, institutions ( name )')
     .maybeSingle();
 
   if (error || !data) return null;
@@ -104,8 +116,34 @@ export async function fetchMyProfile(): Promise<RemoteProfile | null> {
     id: data.id,
     institutionId: data.institution_id,
     institutionName,
-    role: data.role,
+    baseRole: data.base_role,
     name: data.name,
     title: data.title ?? undefined,
   };
+}
+
+/**
+ * Fetches the signed-in user's administrative authority (separate from
+ * identity - see Milestone 1 plan). A person can be, e.g., base_role
+ * 'lecturer' AND hold institution_admin authority at the same time.
+ */
+export async function fetchMyAdminAuthority(): Promise<AdminAuthority> {
+  // platform_admins has NO client SELECT policy at all, for any role -
+  // by design (see migration 0002). That's correct: nothing this
+  // milestone needs to show a platform-admin-specific UI, so there's no
+  // reason to expose even a truthy/falsy read of it to the client. If a
+  // platform-admin console is ever built, this should become a check the
+  // *server* makes (e.g. inside a service-role-backed API route), not a
+  // client-side read - so `isPlatformAdmin` is deliberately always false
+  // from here, not a broken attempt at a query that can never succeed.
+  const { data } = await supabase
+    .from('admin_roles')
+    .select('institution_id, role')
+    .eq('role', 'institution_admin');
+
+  const institutionAdminOf = (data ?? [])
+    .map((row) => row.institution_id)
+    .filter((id): id is string => !!id);
+
+  return { isPlatformAdmin: false, institutionAdminOf };
 }

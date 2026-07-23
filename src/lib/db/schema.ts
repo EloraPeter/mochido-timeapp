@@ -28,6 +28,12 @@ export interface User {
   // so every existing local-only feature keeps working unchanged - they
   // only ever read `id`, not how it was assigned.
   institutionId?: string;
+  // Added for the offline PIN-unlock fix (Milestone 1). Set whenever a
+  // LIVE Supabase authentication succeeds (registration, full login, or a
+  // successful background session check). PIN unlock checks this
+  // locally, with no network call required, instead of depending on a
+  // live session check at the moment of unlock - see pinAuth.ts.
+  lastVerifiedAt?: string;
 }
 
 // Entity 1: Global Course Identity (what the course IS)

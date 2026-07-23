@@ -10,7 +10,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading, user, adminAuthority, isInstitutionAdmin } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   
@@ -20,9 +20,19 @@ export default function DashboardLayout({
       return;
     }
     
-    // Role-based route protection
     if (!isLoading && user) {
-      // Determine expected role from pathname
+      if (pathname.includes('/admin')) {
+        // Admin authority loads asynchronously (best-effort, after user is
+        // set) - wait for it to resolve rather than redirecting away on
+        // the initial null/loading state, which would false-negative
+        // bounce a legitimate admin before their authority check lands.
+        if (adminAuthority !== null && !isInstitutionAdmin) {
+          router.push(`/dashboard/${user.role}`);
+        }
+        return;
+      }
+
+      // Role-based route protection for student/lecturer paths - unchanged.
       let expectedRole: string | null = null;
       if (pathname.includes('/student')) {
         expectedRole = 'student';
@@ -30,13 +40,12 @@ export default function DashboardLayout({
         expectedRole = 'lecturer';
       }
       
-      // If path specifies a role and it doesn't match user's role, redirect
       if (expectedRole && user.role !== expectedRole) {
         const correctPath = `/dashboard/${user.role}`;
         router.push(correctPath);
       }
     }
-  }, [isAuthenticated, isLoading, router, pathname, user]);
+  }, [isAuthenticated, isLoading, router, pathname, user, adminAuthority, isInstitutionAdmin]);
   
   if (isLoading) {
     return (

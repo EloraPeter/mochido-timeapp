@@ -7,28 +7,32 @@ import {
   signInWithEmail,
   signOutSupabase,
   getSupabaseSession,
+  getSupabaseUser,
   createProfileRow,
   fetchMyProfile,
+  fetchMyAdminAuthority,
 } from '@/lib/supabase/auth';
+import type { AdminAuthority } from '@/lib/supabase/auth';
 
 // ============================================================
-// Milestone 0 note on how this file's job has changed:
+// Milestone 0/1 notes on how this file's job has changed:
 //
-// Supabase Auth (email/password) is now the real identity system - see
+// Supabase Auth (email/password) is the real identity system - see
 // createUser()/loginWithEmail() below. The local IndexedDB `User` row and
 // localStorage session pointers still exist and still work exactly as
-// before for every OTHER part of the app (tasks, routines, streaks, mascot,
-// course hooks, etc.) - they only ever call getCurrentUserId()/
-// getCurrentUserRole(), both unchanged, both still synchronous, both still
-// backed by localStorage. The local User.id is now always set to the
-// Supabase auth.uid(), so nothing downstream needed to change.
+// before for every OTHER part of the app (tasks, routines, streaks,
+// mascot, course hooks, etc.) - they only ever call getCurrentUserId()/
+// getCurrentUserRole(), both unchanged, both still synchronous, both
+// still backed by localStorage.
 //
-// The PIN itself changes job: it's no longer how a user is identified
-// (verifyPin used to search every locally-stored user by hash - fragile,
-// and meaningless once real remote accounts exist). It's now an optional,
-// per-device quick-unlock layered on top of an already-valid Supabase
-// session. See verifyLocalPin()/setLocalUnlockPin()/hasLocalUnlockPin().
+// Milestone 1 fixes a real offline-first regression from Milestone 0:
+// verifyLocalPin() used to require a LIVE Supabase session check, which
+// can fail offline once the access token needs a refresh (default 1hr
+// expiry) - see verifyLocalPin() below for the grace-period fix. PIN
+// correctness and account validity are now fully decoupled.
 // ============================================================
+
+export const PIN_UNLOCK_GRACE_PERIOD_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
 // Simple hash for PIN (not cryptographic, just obfuscation) - unchanged.
 function hashPin(pin: string): string {
@@ -51,10 +55,22 @@ function persistLocalSession(user: User) {
   localStorage.setItem('mochi_user_name', user.name);
 }
 
+/** Best-effort background check - refreshes lastVerifiedAt if a live session is reachable, but NEVER blocks or denies unlock if it isn't (that's the whole point of the grace period fix). Errors are swallowed deliberately. */
+async function tryRefreshVerification(userId: string): Promise<void> {
+  try {
+    const session = await getSupabaseSession();
+    if (session) {
+      await updateItem<User>(STORES.users, userId, { lastVerifiedAt: new Date().toISOString() });
+    }
+  } catch {
+    // Offline or unreachable - fine, grace period covers this.
+  }
+}
+
 // ============================================================
-// Registration - now creates a real Supabase Auth account + institution
-// profile, then mirrors a local IndexedDB User row (keyed by the same id)
-// so every existing local-only feature keeps working unchanged.
+// Registration - creates a real Supabase Auth account + institution
+// profile, then mirrors a local IndexedDB User row (keyed by the same
+// id) so every existing local-only feature keeps working unchanged.
 // ============================================================
 export async function createUser(
   name: string,
@@ -73,12 +89,13 @@ export async function createUser(
 
   const institution = await resolveInstitutionByJoinCode(joinCode);
   if (!institution) {
-    throw new Error('Invalid institution join code. Check with your school and try again.');
+    throw new Error('Invalid or expired institution join code. Check with your school and try again.');
   }
 
   const supaUser = await signUpWithEmail(email, password);
-  await createProfileRow({ userId: supaUser.id, institutionId: institution.id, role, name: name.trim() });
+  await createProfileRow({ userId: supaUser.id, institutionId: institution.id, baseRole: role, name: name.trim() });
 
+  const now = new Date().toISOString();
   const user: User = {
     id: supaUser.id,
     name: name.trim(),
@@ -86,6 +103,7 @@ export async function createUser(
     role,
     createdAt: new Date(),
     institutionId: institution.id,
+    lastVerifiedAt: now, // just had a live Supabase auth - fully verified right now
   };
 
   await addItem(STORES.users, user);
@@ -103,43 +121,85 @@ export async function loginWithEmail(email: string, password: string): Promise<U
 
   const profile = await fetchMyProfile();
   if (!profile) {
-    throw new Error('No profile found for this account yet. Contact your institution admin.');
-  }
-  if (profile.role !== 'student' && profile.role !== 'lecturer') {
-    throw new Error('This account type is not yet supported in the app.');
+    // Orphaned account - auth exists but the profile insert never
+    // completed (e.g. network drop mid-registration). Signal this
+    // distinctly so the UI can route to /complete-profile instead of a
+    // dead-end error - see completeProfile() below.
+    const err = new Error('PROFILE_MISSING');
+    err.name = 'ProfileMissingError';
+    throw err;
   }
 
-  // Mirror (or create, on a new device) the local User row so every
-  // existing local-only hook keeps working exactly as before.
+  const now = new Date().toISOString();
   let localUser = await getItem<User>(STORES.users, supaUser.id);
   if (!localUser) {
     localUser = {
       id: supaUser.id,
       name: profile.name,
       pin: '', // no local PIN set on this device yet
-      role: profile.role,
+      role: profile.baseRole,
       createdAt: new Date(),
       institutionId: profile.institutionId,
+      lastVerifiedAt: now,
     };
     await addItem(STORES.users, localUser);
-  } else if (localUser.institutionId !== profile.institutionId || localUser.name !== profile.name) {
-    // Keep the local mirror in step with the server profile if either changed.
+  } else {
     await updateItem<User>(STORES.users, localUser.id, {
       name: profile.name,
       institutionId: profile.institutionId,
+      lastVerifiedAt: now,
     });
-    localUser = { ...localUser, name: profile.name, institutionId: profile.institutionId };
+    localUser = { ...localUser, name: profile.name, institutionId: profile.institutionId, lastVerifiedAt: now };
   }
 
   persistLocalSession(localUser);
   return localUser;
 }
 
+/**
+ * Recovery path for an orphaned Supabase Auth account (see
+ * loginWithEmail's ProfileMissingError above) - completes profile
+ * creation using the ALREADY-authenticated session, no new signUp call.
+ */
+export async function completeProfile(name: string, role: 'student' | 'lecturer', joinCode: string): Promise<User> {
+  const supaUser = await getSupabaseUser();
+  if (!supaUser) throw new Error('Not signed in - please log in again first.');
+  if (!name.trim()) throw new Error('Name is required');
+
+  const institution = await resolveInstitutionByJoinCode(joinCode);
+  if (!institution) throw new Error('Invalid or expired institution join code.');
+
+  await createProfileRow({ userId: supaUser.id, institutionId: institution.id, baseRole: role, name: name.trim() });
+
+  const now = new Date().toISOString();
+  const user: User = {
+    id: supaUser.id,
+    name: name.trim(),
+    pin: '',
+    role,
+    createdAt: new Date(),
+    institutionId: institution.id,
+    lastVerifiedAt: now,
+  };
+  await addItem(STORES.users, user);
+  persistLocalSession(user);
+  return user;
+}
+
+/** Whether the currently signed-in Supabase account has no profile row yet (orphaned - needs /complete-profile). */
+export async function needsProfileCompletion(): Promise<boolean> {
+  const supaUser = await getSupabaseUser();
+  if (!supaUser) return false;
+  const profile = await fetchMyProfile();
+  return !profile;
+}
+
 // ============================================================
 // Local PIN quick-unlock (per device) - checks the PIN against THIS
-// device's already-logged-in local user AND confirms the underlying
-// Supabase session is still valid. Does not search across users at all -
-// that was the old, no-longer-safe behavior.
+// device's local user AND a local grace period, NOT a live Supabase
+// session check. This is the Milestone 1 offline-first fix: PIN
+// correctness and account validity are fully decoupled, so the default
+// app-opening path works with no network at all.
 // ============================================================
 export async function verifyLocalPin(pin: string): Promise<User | null> {
   if (!isValidPin(pin)) return null;
@@ -150,10 +210,15 @@ export async function verifyLocalPin(pin: string): Promise<User | null> {
   const user = await getItem<User>(STORES.users, userId);
   if (!user || !user.pin || user.pin !== hashPin(pin)) return null;
 
-  const session = await getSupabaseSession();
-  if (!session) return null; // stale/expired remote session - force full login instead
+  const lastVerified = user.lastVerifiedAt ? new Date(user.lastVerifiedAt).getTime() : 0;
+  const withinGracePeriod = Date.now() - lastVerified < PIN_UNLOCK_GRACE_PERIOD_MS;
+  if (!withinGracePeriod) return null; // needs a full online login to re-verify
 
   persistLocalSession(user);
+  // Best-effort, non-blocking - refreshes the grace period window if a
+  // live session happens to be reachable, but never gates unlock on it.
+  void tryRefreshVerification(userId);
+
   return user;
 }
 
@@ -171,6 +236,15 @@ export async function setLocalUnlockPin(pin: string): Promise<void> {
   const userId = localStorage.getItem('mochi_user_id');
   if (!userId) throw new Error('Not logged in');
   await updateItem<User>(STORES.users, userId, { pin: hashPin(pin) });
+}
+
+/** Fetches the signed-in user's administrative authority (institution_admin, etc.) - separate from identity. Best-effort: returns no authority if offline/unreachable, never throws. */
+export async function getMyAdminAuthority(): Promise<AdminAuthority> {
+  try {
+    return await fetchMyAdminAuthority();
+  } catch {
+    return { isPlatformAdmin: false, institutionAdminOf: [] };
+  }
 }
 
 // Get current logged-in user (async) - unchanged.
@@ -215,10 +289,9 @@ export function getFormattedName(user: User): string {
   return user.name.split(' ')[0];
 }
 
-// Logout - now also signs out of the real Supabase session, in addition
-// to clearing the local session pointers exactly as before. Does NOT
-// delete any local IndexedDB data (personal tasks/routines/etc. remain
-// available offline, same as before).
+// Logout - signs out of the real Supabase session, in addition to
+// clearing the local session pointers. Does NOT delete any local
+// IndexedDB data (personal tasks/routines/etc. remain available offline).
 export async function logout(): Promise<void> {
   localStorage.removeItem('mochi_user_id');
   localStorage.removeItem('mochi_user_role');

@@ -2,8 +2,9 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/db/schema';
-import { getCurrentUser, logout as logoutUser } from '@/lib/auth/pinAuth';
+import { getCurrentUser, logout as logoutUser, getMyAdminAuthority, PIN_UNLOCK_GRACE_PERIOD_MS } from '@/lib/auth/pinAuth';
 import { getSupabaseSession } from '@/lib/supabase/auth';
+import type { AdminAuthority } from '@/lib/supabase/auth';
 import { startReminderScheduler } from '@/lib/notifications/reminderScheduler';
 import { processNotificationQueue, cleanupOldNotifications } from '@/lib/notifications/notificationQueue';
 
@@ -11,6 +12,8 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  adminAuthority: AdminAuthority | null;
+  isInstitutionAdmin: boolean;
   login: (user: User) => void;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -21,31 +24,49 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [adminAuthority, setAdminAuthority] = useState<AdminAuthority | null>(null);
 
   const refreshUser = useCallback(async () => {
     try {
       const currentUser = await getCurrentUser();
       if (!currentUser) {
         setUser(null);
+        setAdminAuthority(null);
         return;
       }
 
-      // A local User row existing doesn't mean the underlying Supabase
-      // session is still valid (expired token, signed out elsewhere,
-      // etc.) - confirm it here rather than trusting the local pointer
-      // alone. This is additive: nothing about the exported interface
-      // changes, callers still just get back `User | null`.
-      const session = await getSupabaseSession();
-      if (!session) {
-        await logoutUser();
-        setUser(null);
-        return;
+      // Milestone 1 offline-first fix: don't hard-require a LIVE Supabase
+      // session on every app load (page refresh, reopening the PWA,
+      // etc.) - that has the exact same offline-breaking failure mode as
+      // the PIN unlock bug (verifyLocalPin in pinAuth.ts). Use the same
+      // local grace period instead; only fall back to requiring a live
+      // check once that window has actually expired.
+      const lastVerified = currentUser.lastVerifiedAt ? new Date(currentUser.lastVerifiedAt).getTime() : 0;
+      const withinGracePeriod = Date.now() - lastVerified < PIN_UNLOCK_GRACE_PERIOD_MS;
+
+      if (!withinGracePeriod) {
+        const session = await getSupabaseSession();
+        if (!session) {
+          await logoutUser();
+          setUser(null);
+          setAdminAuthority(null);
+          return;
+        }
       }
 
       setUser(currentUser);
+
+      // Best-effort, non-blocking - administrative authority is only
+      // needed to decide whether to show an "Admin Console" entry point
+      // somewhere in the UI, not to gate anything security-sensitive
+      // (RLS is the real enforcement). Never block app load on this.
+      getMyAdminAuthority()
+        .then(setAdminAuthority)
+        .catch(() => setAdminAuthority({ isPlatformAdmin: false, institutionAdminOf: [] }));
     } catch (error) {
       console.error('Failed to refresh user:', error);
       setUser(null);
+      setAdminAuthority(null);
     }
   }, []);
 
@@ -60,11 +81,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = (loggedInUser: User) => {
     setUser(loggedInUser);
+    getMyAdminAuthority()
+      .then(setAdminAuthority)
+      .catch(() => setAdminAuthority({ isPlatformAdmin: false, institutionAdminOf: [] }));
   };
 
   const logout = async () => {
     await logoutUser();
     setUser(null);
+    setAdminAuthority(null);
   };
 
   // Deadline reminders: decide which tasks need a reminder right now and
@@ -96,6 +121,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     user,
     isLoading,
     isAuthenticated: !!user,
+    adminAuthority,
+    isInstitutionAdmin: !!adminAuthority && adminAuthority.institutionAdminOf.length > 0,
     login,
     logout,
     refreshUser,
