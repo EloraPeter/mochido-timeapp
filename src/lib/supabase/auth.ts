@@ -90,23 +90,33 @@ export async function createProfileRow(params: {
   baseRole: 'student' | 'lecturer';
   name: string;
 }): Promise<void> {
-  const { error } = await supabase.from('profiles').insert({
+  const { error } = await supabase.from('profiles').upsert({
     id: params.userId,
     institution_id: params.institutionId,
     base_role: params.baseRole,
+    role: params.baseRole,        // required until 0003
     name: params.name,
   });
+
   if (error) throw new Error(error.message);
 }
 
 /** Fetches the signed-in user's own profile (RLS restricts this to exactly one row: their own). Returns null if no profile exists yet (orphaned auth account - see /complete-profile). */
 export async function fetchMyProfile(): Promise<RemoteProfile | null> {
+  const user = await getSupabaseUser();
+  if (!user) return null;
+
   const { data, error } = await supabase
     .from('profiles')
     .select('id, institution_id, base_role, name, title, institutions ( name )')
+    .eq('id', user.id)
     .maybeSingle();
 
-  if (error || !data) return null;
+  if (error) {
+    console.error('fetchMyProfile error:', error);
+    return null;
+  }
+  if (!data) return null;
 
   const institutionName = Array.isArray(data.institutions)
     ? (data.institutions[0] as any)?.name
