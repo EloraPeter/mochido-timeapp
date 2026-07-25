@@ -90,18 +90,32 @@ export async function createProfileRow(params: {
   baseRole: 'student' | 'lecturer';
   name: string;
 }): Promise<void> {
-  const { error } = await supabase.from('profiles').upsert({
+  // STABILIZATION FIX (post-Milestone-1): use `insert`, not `upsert`.
+  // `profiles` is an identity table with `id` as its primary key - an
+  // upsert would silently overwrite an existing profile's institution/
+  // role/name on a conflict instead of erroring. Duplicate profile
+  // creation should fail loudly, not corrupt data quietly. If
+  // PROFILE_MISSING is ever wrongly signaled for an account that already
+  // has a real profile, `insert` surfaces that as a clear, loud error
+  // instead of silently rewriting the real row.
+  //
+  // `role` is still written alongside `base_role` - migration 0002
+  // deliberately left `profiles.role` NOT NULL (dual-write is intentional,
+  // temporary compatibility per the approved two-phase migration plan,
+  // not a permanent design). Remove this once the planned later migration
+  // phase actually relaxes/drops the legacy column - not before.
+  const { error } = await supabase.from('profiles').insert({
     id: params.userId,
     institution_id: params.institutionId,
     base_role: params.baseRole,
-    role: params.baseRole,        // required until 0003
+    role: params.baseRole,
     name: params.name,
   });
 
   if (error) throw new Error(error.message);
 }
 
-/** Fetches the signed-in user's own profile (RLS restricts this to exactly one row: their own). Returns null if no profile exists yet (orphaned auth account - see /complete-profile). */
+/** Fetches the signed-in user's own profile (RLS restricts this to exactly one row: their own). Returns null if no profile exists yet (orphaned auth account - see /complete-profile). The explicit `.eq('id', user.id)` filter is kept even though RLS already scopes this identically - explicit intent alongside RLS is reasonable defense in depth, negligible downside. */
 export async function fetchMyProfile(): Promise<RemoteProfile | null> {
   const user = await getSupabaseUser();
   if (!user) return null;
